@@ -3,7 +3,7 @@ from typing import Dict, List, Tuple, Optional
 
 from PIL import Image
 
-from src.utils.load_pairs import parse_pairs_file, split_pairs
+from src.data.load_pairs import parse_pairs_file, split_pairs
 
 
 def load_image_rgb(path: Path) -> Image.Image:
@@ -74,7 +74,7 @@ def batch_load_pair_images(
 ) -> List[Tuple[Image.Image, Image.Image]]:
     """
     Loads PIL images for a list of (img1_path, img2_path).
-    Use for quick EDA or debugging (not recommended for large-scale training loops).
+    Use for quick EDA or debugging (not recommended for large-scale train loops).
     """
     out: List[Tuple[Image.Image, Image.Image]] = []
     n = len(X) if max_items is None else min(len(X), max_items)
