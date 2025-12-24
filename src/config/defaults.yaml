@@ -1,0 +1,101 @@
+# ============================================================
+# Koch et al. (2015) — STRICT PAPER DEFAULTS
+# ============================================================
+# This file intentionally contains NO tuning freedom.
+# If any value is changed, the implementation is no longer 1:1.
+# ============================================================
+
+# ------------------------------------------------------------
+# TRAINING
+# ------------------------------------------------------------
+train:
+  epochs: 200                 # paper: train up to 200 epochs
+  batch_size: 128             # paper: minibatch size = 128
+  seed: 0                     # paper does not specify; fixed for reproducibility
+
+# ------------------------------------------------------------
+# OPTIMIZATION (paper Section 3.1)
+# ------------------------------------------------------------
+optim:
+  optimizer: sgd
+
+  # learning rate decay: η(t) = 0.99 * η(t-1)
+  lr_decay: 0.99
+
+  # momentum schedule
+  momentum_start: 0.5         # paper: momentum starts at 0.5
+  momentum_final: 0.9         # paper: final μ_j (same for all layers unless overridden)
+  momentum_ramp_epochs: 200   # linear ramp over full training
+
+  # layer-wise learning rates η_j
+  # paper allows per-layer values; strict mode exposes them explicitly
+  lr_conv: 0.01
+  lr_fc: 0.01
+  lr_alpha: 0.01
+
+  # layer-wise L2 regularization λ_j
+  # paper: L2 penalty is part of the objective
+  weight_decay_conv: 0.0
+  weight_decay_fc: 0.0
+  weight_decay_alpha: 0.0
+
+# ------------------------------------------------------------
+# EARLY STOPPING (paper Section 3.1)
+# ------------------------------------------------------------
+early_stop:
+  enabled: true
+  patience: 20                # paper: stop if no improvement for 20 epochs
+  monitor: one_shot_err       # paper: validation error (not accuracy)
+  mode: min                   # minimize error
+
+# ------------------------------------------------------------
+# ONE-SHOT EVALUATION (paper protocol)
+# ------------------------------------------------------------
+one_shot:
+  enabled: true
+
+  # paper Omniglot protocol
+  protocol: omniglot_paper
+
+  n_way: 20                   # 20-way classification
+  val_trials: 320             # paper: 320 validation one-shot tasks
+  test_trials: 400            # paper: 400 test one-shot tasks
+
+# ------------------------------------------------------------
+# IMAGE TRANSFORMS (paper affine distortion)
+# ------------------------------------------------------------
+transform:
+  input_size: 105             # paper: 105x105 grayscale input
+
+  # each component included independently with probability 0.5
+  component_apply_prob: 0.5
+
+  # parameter ranges (paper Section 3.1)
+  rotation_deg: [-10.0, 10.0]
+  shear_x: [-0.3, 0.3]
+  shear_y: [-0.3, 0.3]
+  scale_x: [0.8, 1.2]
+  scale_y: [0.8, 1.2]
+  translate_x: [-2.0, 2.0]
+  translate_y: [-2.0, 2.0]
+
+# ------------------------------------------------------------
+# MODEL (architecture is fixed in code)
+# ------------------------------------------------------------
+model:
+  in_channels: 1              # grayscale
+  embedding_dim: 4096         # paper: final FC layer size
+
+# ------------------------------------------------------------
+# DATA (paths are user-specific; not paper-defined)
+# ------------------------------------------------------------
+data:
+  image_ext: ".png"           # Omniglot default; override if needed
+  strict_exists: true
+
+# ------------------------------------------------------------
+# RUNTIME
+# ------------------------------------------------------------
+runtime:
+  num_workers: 2
+  pin_memory: true
