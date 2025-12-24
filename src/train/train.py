@@ -335,22 +335,23 @@ def main(config_path: str = "src/config/config.yaml") -> None:
             g["lr"] = float(g["lr"]) * gamma
 
         # ---- improved print ----
-        msg = (
-            f"Epoch {epoch+1:03d}/{max_epochs} | "
-            f"train_loss={train_loss:.6f} | val_loss={val_loss:.6f} | "
-            f"train_acc@0.5={train_acc_05:.4f} | val_acc@0.5={val_acc_05:.4f} | "
-            f"val_best_acc={verif_metrics['verif_acc_best_thr']:.4f} "
-            f"best_thr={verif_metrics['verif_thr_best']:.3f} | "
+        thr = verif_metrics["verif_thr_best"]
+
+        oneshot_acc = oneshot_metrics.get("oneshot_acc", float("nan"))
+        oneshot_err = oneshot_metrics.get("oneshot_err", float("nan"))
+
+        print(
+            f"Epoch {epoch + 1:03d}/{max_epochs} | "
+            f"train_acc={train_acc_05:.4f} | "
+            f"train_loss={train_loss:.6f} | "
+            f"val_acc={val_acc_05:.4f} | "
+            f"val_loss={val_loss:.6f} | "
+            f"thr={thr:.3f} | "
+            f"oneshot_acc={oneshot_acc:.4f} | "
+            f"oneshot_err={oneshot_err:.4f} | "
+            f"lr0={opt.param_groups[0]['lr']:.6g} | "
+            f"m0={opt.param_groups[0]['momentum']:.3f}"
         )
-
-        if oneshot_metrics:
-            msg += (
-                f"oneshot_acc={oneshot_metrics['oneshot_acc']:.4f} "
-                f"oneshot_err={oneshot_metrics['oneshot_err']:.4f} | "
-            )
-
-        msg += f"lr0={opt.param_groups[0]['lr']:.6g} | m0={opt.param_groups[0]['momentum']:.3f}"
-        print(msg)
 
         # ---- early stopping metric ----
         if oneshot_metrics:

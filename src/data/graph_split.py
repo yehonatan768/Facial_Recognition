@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -7,6 +8,73 @@ from typing import Dict, List, Set, Tuple
 
 
 Pair = Tuple[Path, Path, int]  # (img1_path, img2_path, label)
+
+def _ratio(pairs):
+    if not pairs:
+        return 0.0
+    pos = sum(1 for _,_,y in pairs if y == 1)
+    return pos / len(pairs)
+
+
+def rebalance_pairs_to_ratio(
+    pairs: List[Pair],
+    target_pos_frac: float = 0.5,
+    seed: int = 42,
+) -> List[Pair]:
+    """
+    Downsample within a split to make positives/negatives closer to target_pos_frac.
+
+    Keeps all pairs inside the split (no leakage risk), only removes excess pairs.
+    If exact target is impossible, gets as close as possible without oversampling.
+    """
+    rng = random.Random(seed)
+
+    pos = [p for p in pairs if p[2] == 1]
+    neg = [p for p in pairs if p[2] == 0]
+
+    if not pos or not neg:
+        # Can't rebalance if one class is missing
+        return pairs
+
+    # We want: pos / (pos+neg) ~= target_pos_frac
+    # We will downsample the majority class.
+    n_pos = len(pos)
+    n_neg = len(neg)
+
+    # Desired counts given the limiting class
+    # If pos is limiting:
+    #   keep_pos = n_pos
+    #   keep_neg = n_pos * (1-target)/target
+    # If neg is limiting:
+    #   keep_neg = n_neg
+    #   keep_pos = n_neg * target/(1-target)
+    if target_pos_frac <= 0.0:
+        return neg
+    if target_pos_frac >= 1.0:
+        return pos
+
+    # Compute maximum feasible counts without oversampling
+    max_neg_given_pos = int(round(n_pos * (1.0 - target_pos_frac) / target_pos_frac))
+    max_pos_given_neg = int(round(n_neg * target_pos_frac / (1.0 - target_pos_frac)))
+
+    if max_neg_given_pos <= n_neg:
+        # positives are the limiting side (or equal)
+        keep_pos = n_pos
+        keep_neg = max_neg_given_pos
+    else:
+        # negatives are limiting
+        keep_neg = n_neg
+        keep_pos = max_pos_given_neg
+
+    keep_pos = max(1, min(keep_pos, n_pos))
+    keep_neg = max(1, min(keep_neg, n_neg))
+
+    rng.shuffle(pos)
+    rng.shuffle(neg)
+
+    balanced = pos[:keep_pos] + neg[:keep_neg]
+    rng.shuffle(balanced)
+    return balanced
 
 
 @dataclass(frozen=True)
@@ -185,6 +253,14 @@ def split_by_components(
         else:
             # Crossing pair -> drop to preserve leakage-free split
             continue
+
+
+    train_pairs = rebalance_pairs_to_ratio(train_pairs, target_pos_frac=0.5, seed=seed)
+    val_pairs = rebalance_pairs_to_ratio(val_pairs, target_pos_frac=0.5, seed=seed + 1)
+
+    print(f"[Split] train pairs after balance: n={len(train_pairs)} pos_frac={_ratio(train_pairs):.3f}")
+    print(f"[Split] val   pairs after balance: n={len(val_pairs)} pos_frac={_ratio(val_pairs):.3f}")
+
 
     return GraphSplitResult(
         train_pairs=train_pairs,
