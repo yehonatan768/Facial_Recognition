@@ -26,6 +26,22 @@ from src.evaluation.verification import find_best_threshold
 from src.evaluation.one_shot import evaluate_one_shot
 
 
+def _project_root() -> Path:
+    # src/run/train.py -> parents[2] == project root
+    return Path(__file__).resolve().parents[2]
+
+
+def _default_config_path() -> Path:
+    return _project_root() / "config.yaml"
+
+
+def _resolve_under_root(p: Path) -> Path:
+    # If user gave a relative path in config.yaml, interpret it as project-root-relative
+    if p.is_absolute():
+        return p
+    return (_project_root() / p).resolve()
+
+
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
     """Recursive dict merge: override wins."""
     out = dict(base)
@@ -73,9 +89,9 @@ def _resolve_paths(cfg: Dict[str, Any], args) -> Dict[str, Path]:
         )
 
     return {
-        "images_root": images_root,
-        "pairs_train": pairs_train,
-        "pairs_test": pairs_test,
+        "images_root": _resolve_under_root(images_root),
+        "pairs_train": _resolve_under_root(pairs_train),
+        "pairs_test": _resolve_under_root(pairs_test),
     }
 
 
@@ -95,7 +111,12 @@ def _save_ckpt(path: Path, model: torch.nn.Module, optim: torch.optim.Optimizer,
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", type=str, required=True, help="Your run config YAML (can be minimal).")
+    ap.add_argument(
+        "--config",
+        type=str,
+        default="",
+        help="Optional. If omitted, uses <project_root>/config.yaml",
+    )
     ap.add_argument("--defaults", type=str, default="", help="Optional defaults YAML (paper defaults).")
     ap.add_argument("--workdir", type=str, default="outputs", help="Where to write checkpoints/logs.")
     ap.add_argument("--device", type=str, default="auto", help="auto|cpu|cuda|cuda:0")
@@ -105,8 +126,9 @@ def main() -> None:
     ap.add_argument("--pairs-test", type=str, default="", help="Override cfg.paths.pairs_test")
     args = ap.parse_args()
 
-    # Load cfg (defaults first, then config overrides)
-    cfg_user = read_model_config(args.config)
+    cfg_path = Path(args.config) if args.config else _default_config_path()
+    cfg_user = read_model_config(cfg_path)
+
     cfg = cfg_user
     if args.defaults:
         cfg_defaults = read_model_config(args.defaults)

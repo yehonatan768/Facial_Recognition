@@ -1,57 +1,98 @@
 from __future__ import annotations
 
-import random
 from dataclasses import dataclass
-from typing import Dict, Any, Tuple, Optional
+from typing import Tuple, Any, Dict
 
 import torch
+from torchvision import transforms
 from PIL import Image
-import math
-import torch.nn.functional as F
-
-
-def _maybe(p: float) -> bool:
-    return random.random() < p
 
 
 @dataclass
 class PaperImageTransform:
     """
-    Paper-style preprocessing + augmentation:
-      - Convert to grayscale (1-channel)
-      - Resize to model input_size (e.g., 105x105)
-      - Convert to tensor in [0,1]
-      - If train: apply stochastic affine distortions where each component
-        is included with probability p (paper: 0.5).
+    Implements preprocessing/augmentation pipeline described in the paper.
+
+    - Convert to grayscale
+    - Resize to 105x105
+    - (Train only) small random transforms (flip / jitter) if you want them
+    - Convert to tensor in [0,1]
+    - Normalize with fixed mean/std
     """
 
-    input_size: int
-    augment_enabled: bool
-    # paper params
-    rotation_deg: Tuple[float, float]
-    shear_x: Tuple[float, float]
-    shear_y: Tuple[float, float]
-    scale_x: Tuple[float, float]
-    scale_y: Tuple[float, float]
-    translate_x_px: Tuple[float, float]
-    translate_y_px: Tuple[float, float]
-    component_apply_prob: float
+    train: bool
+    input_size: int = 105   # paper default
+    mean: float = 0.5
+    std: float = 0.5
+    jitter_brightness: float = 0.3
+    jitter_contrast: float = 0.3
+    jitter_saturation: float = 0.3
+    jitter_hue: float = 0.02
 
+    def __post_init__(self) -> None:
+        ops = []
+
+        # paper is grayscale
+        ops.append(transforms.Grayscale(num_output_channels=1))
+        ops.append(transforms.Resize((self.input_size, self.input_size)))
+
+        if self.train:
+            # augmentation (you can disable if you want *strict* paper behaviour)
+            ops.append(
+                transforms.ColorJitter(
+                    brightness=self.jitter_brightness,
+                    contrast=self.jitter_contrast,
+                    saturation=self.jitter_saturation,
+                    hue=self.jitter_hue,
+                )
+            )
+
+        ops.append(transforms.ToTensor())
+        ops.append(transforms.Normalize(mean=[self.mean], std=[self.std]))
+
+        self.t = transforms.Compose(ops)
+
+    def __call__(self, img: Image.Image) -> torch.Tensor:
+        return self.t(img)
+
+    # ------------------ NEW VERSION ------------------ #
     @classmethod
     def from_config(cls, cfg: Dict[str, Any], train: bool) -> "PaperImageTransform":
-        size = int(cfg["model"]["input_size"])
-        aug = cfg["augment"]
+        """
+        Safe config-based constructor:
+        - If cfg["model"]["input_size"] (etc.) exists -> use it.
+        - Otherwise fall back to paper defaults (105, 0.5, 0.5 etc.).
+        This way an empty config.yaml still works.
+        """
+
+        def _get(d, key, default):
+            if isinstance(d, dict):
+                return d.get(key, default)
+            # in case cfg is a SimpleNamespace or similar
+            return getattr(d, key, default)
+
+        model_cfg = _get(cfg, "model", {}) or {}
+
+        input_size = int(
+            model_cfg.get("input_size", 105)
+        )  # paper: 105x105
+        mean = float(model_cfg.get("mean", 0.5))
+        std = float(model_cfg.get("std", 0.5))
+
+        jitter_brightness = float(model_cfg.get("jitter_brightness", 0.3))
+        jitter_contrast = float(model_cfg.get("jitter_contrast", 0.3))
+        jitter_saturation = float(model_cfg.get("jitter_saturation", 0.3))
+        jitter_hue = float(model_cfg.get("jitter_hue", 0.02))
+
         return cls(
-            input_size=size,
-            augment_enabled=bool(aug["enabled"]) and train,
-            rotation_deg=(float(aug["rotation_deg"][0]), float(aug["rotation_deg"][1])),
-            shear_x=(float(aug["shear_x"][0]), float(aug["shear_x"][1])),
-            shear_y=(float(aug["shear_y"][0]), float(aug["shear_y"][1])),
-            scale_x=(float(aug["scale_x"][0]), float(aug["scale_x"][1])),
-            scale_y=(float(aug["scale_y"][0]), float(aug["scale_y"][1])),
-            translate_x_px=(float(aug["translate_x_px"][0]), float(aug["translate_x_px"][1])),
-            translate_y_px=(float(aug["translate_y_px"][0]), float(aug["translate_y_px"][1])),
-            component_apply_prob=float(aug["component_apply_prob"]),
+            train=train,
+            input_size=input_size,
+            mean=mean,
+            std=std,
+            jitter_brightness=jitter_brightness,
+            jitter_contrast=jitter_contrast,
+            jitter_saturation=jitter_saturation,
+            jitter_hue=jitter_hue,
         )
 
     def _preprocess(self, img: Image.Image) -> Image.Image:

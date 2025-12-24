@@ -6,6 +6,20 @@
 # ============================================================
 
 # ------------------------------------------------------------
+# PATHS (user-specific; required to run)
+# ------------------------------------------------------------
+paths:
+  # Option A (recommended): relative to project root
+  images_root: "images"
+  pairs_train: "assets/pairsDevTrain.txt"
+  pairs_test: "assets/pairsDevTest.txt"
+
+  # Option B (Colab example): absolute paths (uncomment and edit)
+  # images_root: "/content/Face_Recognition/images"
+  # pairs_train: "/content/Face_Recognition/assets/pairsDevTrain.txt"
+  # pairs_test: "/content/Face_Recognition/assets/pairsDevTest.txt"
+
+# ------------------------------------------------------------
 # TRAINING
 # ------------------------------------------------------------
 train:
