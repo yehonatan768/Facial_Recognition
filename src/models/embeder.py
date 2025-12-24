@@ -25,16 +25,13 @@ class WeightedL1Embedder(nn.Module):
 
 
 class SigmoidDecider(nn.Module):
-    """
-    Paper: a single sigmoidal output unit fed by the induced metric.
-    """
-
     def __init__(self) -> None:
         super().__init__()
+        self.bias = nn.Parameter(torch.tensor(0.0))
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, score: torch.Tensor) -> torch.Tensor:
-        return self.sigmoid(score)
+        return self.sigmoid(self.bias - score)
 
 
 class FullSiameseModel(nn.Module):
