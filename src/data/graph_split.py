@@ -15,6 +15,10 @@ class GraphSplitResult:
     val_pairs: List[Pair]
     train_ids: Set[str]
     val_ids: Set[str]
+    # Optional debug stats
+    num_components: int
+    target_val_identities: int
+    achieved_val_identities: int
 
 
 def _identity(p: Path) -> str:
@@ -59,6 +63,85 @@ def connected_components(g: Dict[str, Set[str]]) -> List[Set[str]]:
     return comps
 
 
+def _choose_val_components_close_to_target(
+    comps: List[Set[str]],
+    target: int,
+    seed: int = 42,
+) -> Set[int]:
+    """
+    Choose a subset of components whose total size is as close as possible to `target`,
+    without splitting any component (leakage-safe).
+
+    Heuristic:
+      1) Greedy "best-fit" by descending size.
+      2) Local improvement by attempting single swaps (replace one selected comp with one unselected comp)
+         to reduce absolute error to target.
+    """
+    import random
+    rng = random.Random(seed)
+
+    sizes = [len(c) for c in comps]
+    idxs = list(range(len(comps)))
+
+    # Shuffle first to break ties deterministically by seed, then sort by size descending
+    rng.shuffle(idxs)
+    idxs.sort(key=lambda i: sizes[i], reverse=True)
+
+    selected: Set[int] = set()
+    cur = 0
+
+    # --- Greedy best-fit ---
+    # For each component, decide if including it improves closeness to target.
+    for i in idxs:
+        s = sizes[i]
+        # Always allow adding if we are below target and it moves us closer
+        if abs((cur + s) - target) < abs(cur - target):
+            selected.add(i)
+            cur += s
+
+    # If greedy picks nothing (rare), pick the single closest component
+    if not selected and comps:
+        best_i = min(range(len(comps)), key=lambda i: abs(sizes[i] - target))
+        selected.add(best_i)
+        cur = sizes[best_i]
+
+    # --- Local improvement (single swap search) ---
+    # Try to reduce abs(cur-target) by swapping one-in/one-out.
+    improved = True
+    while improved:
+        improved = False
+        best_err = abs(cur - target)
+
+        selected_list = list(selected)
+        unselected_list = [i for i in range(len(comps)) if i not in selected]
+
+        # Limit search for speed if huge number of components
+        # (still typically fine for LFW-sized data)
+        max_checks = 20000
+        checks = 0
+
+        for i_out in selected_list:
+            for i_in in unselected_list:
+                checks += 1
+                if checks > max_checks:
+                    break
+
+                new_cur = cur - sizes[i_out] + sizes[i_in]
+                new_err = abs(new_cur - target)
+                if new_err < best_err:
+                    # Perform the improving swap
+                    selected.remove(i_out)
+                    selected.add(i_in)
+                    cur = new_cur
+                    improved = True
+                    best_err = new_err
+                    break
+            if checks > max_checks or improved:
+                break
+
+    return selected
+
+
 def split_by_components(
     pairs: List[Pair],
     val_ratio: float = 0.2,
@@ -68,26 +151,23 @@ def split_by_components(
     """
     Leakage-free split:
       - compute connected components in identity graph
-      - assign whole components to VAL until reaching target #identities
+      - choose whole components for VAL to get as close as possible to target #identities
       - TRAIN = remaining identities
       - keep only pairs whose BOTH identities belong to the same split
     """
-    import random
-    rng = random.Random(seed)
-
     g = build_identity_graph(pairs)
     comps = connected_components(g)
-    rng.shuffle(comps)
 
     all_ids = set(g.keys())
     target = max(int(round(len(all_ids) * val_ratio)), min_val_identities)
     target = min(target, len(all_ids))
 
+    # Choose subset of components that best matches target
+    selected_comp_idxs = _choose_val_components_close_to_target(comps=comps, target=target, seed=seed)
+
     val_ids: Set[str] = set()
-    for comp in comps:
-        if len(val_ids) >= target:
-            break
-        val_ids |= comp
+    for i in selected_comp_idxs:
+        val_ids |= comps[i]
 
     train_ids = all_ids - val_ids
 
@@ -103,7 +183,7 @@ def split_by_components(
         elif a in val_ids and b in val_ids:
             val_pairs.append((p1, p2, y))
         else:
-            # Crossing pair (rare but possible) -> drop to preserve leakage-free split
+            # Crossing pair -> drop to preserve leakage-free split
             continue
 
     return GraphSplitResult(
@@ -111,4 +191,7 @@ def split_by_components(
         val_pairs=val_pairs,
         train_ids=train_ids,
         val_ids=val_ids,
+        num_components=len(comps),
+        target_val_identities=target,
+        achieved_val_identities=len(val_ids),
     )
