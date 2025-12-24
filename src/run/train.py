@@ -32,7 +32,7 @@ def _project_root() -> Path:
 
 
 def _default_config_path() -> Path:
-    return _project_root() / "config.yaml"
+    return  "src/config/config.yaml"
 
 
 def _resolve_under_root(p: Path) -> Path:
@@ -71,10 +71,9 @@ def _resolve_paths(cfg: Dict[str, Any], args) -> Dict[str, Path]:
     Resolve required paths either from cfg["paths"] or CLI.
     """
     paths = cfg.get("paths", {})
-    images_root = Path(args.images_root or paths.get("images_root", ""))
-    pairs_train = Path(args.pairs_train or paths.get("pairs_train", ""))
-    pairs_test = Path(args.pairs_test or paths.get("pairs_test", ""))
-
+    images_root = Path(args.images_root or paths.get("images_root", "images"))
+    pairs_train = Path(args.pairs_train or paths.get("pairs_train", "assets/pairsDevTrain.txt"))
+    pairs_test = Path(args.pairs_test or paths.get("pairs_test", "assets/pairsDevTest.txt"))
     missing = []
     if not str(images_root):
         missing.append("images_root")
@@ -89,9 +88,9 @@ def _resolve_paths(cfg: Dict[str, Any], args) -> Dict[str, Path]:
         )
 
     return {
-        "images_root": _resolve_under_root(images_root),
-        "pairs_train": _resolve_under_root(pairs_train),
-        "pairs_test": _resolve_under_root(pairs_test),
+        "images_root": images_root,
+        "pairs_train": pairs_train,
+        "pairs_test": pairs_test,
     }
 
 
@@ -115,7 +114,7 @@ def main() -> None:
         "--config",
         type=str,
         default="",
-        help="Optional. If omitted, uses <project_root>/config.yaml",
+        help="Optional. If omitted, uses src/config/config.yaml",
     )
     ap.add_argument("--defaults", type=str, default="", help="Optional defaults YAML (paper defaults).")
     ap.add_argument("--workdir", type=str, default="outputs", help="Where to write checkpoints/logs.")
@@ -153,7 +152,6 @@ def main() -> None:
     ext = str(cfg.get("data", {}).get("image_ext", cfg.get("data", {}).get("ext", ".jpg")))
     strict_exists = bool(cfg.get("data", {}).get("strict_exists", True))
 
-    # Load paper-style pairs (train/test) using your loader
     loaded = load_train_test_pairs(
         train_pairs_path=pairs_train_path,
         test_pairs_path=pairs_test_path,
@@ -162,8 +160,22 @@ def main() -> None:
         logger=logger,
         strict_exists=strict_exists,
     )
+
     train_pairs_all = loaded["train_pairs"]
     test_pairs = loaded["test_pairs"]
+
+    if len(train_pairs_all) == 0:
+        raise RuntimeError(
+            "No training pairs were loaded (all pairs filtered out as missing).\n"
+            f"images_root={images_root.resolve()}\n"
+            f"pairs_train={pairs_train_path.resolve()}\n"
+            f"pairs_test={pairs_test_path.resolve()}\n"
+            f"ext={ext!r} strict_exists={strict_exists}\n\n"
+            "Likely causes:\n"
+            "1) Wrong images_root (folder does not contain identity subfolders)\n"
+            "2) Wrong image_ext (e.g., config says .png but files are .jpg)\n"
+            "3) Pair file format does not match dataset naming\n"
+        )
 
     # Split train into train/val without identity leakage (your graph split)
     split_cfg = cfg.get("split", {})
@@ -239,7 +251,15 @@ def main() -> None:
         va_stats, va_probs, va_labels = eval_one_epoch(model=model, loader=val_loader, device=device)
 
         # Verification best threshold on VAL
-        thr, ver_acc = find_best_threshold(va_probs, va_labels)
+        res = find_best_threshold(va_probs, va_labels)
+
+        # Support both legacy tuple return and newer VerificationResult object
+        if isinstance(res, tuple) and len(res) == 2:
+            thr, ver_acc = float(res[0]), float(res[1])
+        else:
+            # Try common attribute names
+            thr = float(getattr(res, "thr_best", getattr(res, "thr", getattr(res, "threshold", 0.5))))
+            ver_acc = float(getattr(res, "acc_best", getattr(res, "acc", getattr(res, "accuracy", 0.0))))
 
         # One-shot validation (paper monitors error)
         oneshot_acc = float("nan")
@@ -266,7 +286,7 @@ def main() -> None:
             f"train_acc={tr_stats.acc:.4f} train_loss={tr_stats.loss:.6f} | "
             f"val_acc={va_stats.acc:.4f} val_loss={va_stats.loss:.6f} | "
             f"thr={thr:.3f} oneshot_acc={oneshot_acc:.4f} oneshot_err={oneshot_err:.4f} | "
-            f"lr0={lr0:.8f m0={m0:.3f}}".replace("m0=", "| m0=")  # keep formatting stable
+            f"lr0={lr0:.8f} | m0={m0:.3f}"
         )
 
         row = {

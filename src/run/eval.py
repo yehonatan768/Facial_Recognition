@@ -15,7 +15,7 @@ from src.data.datasets import build_pair_loaders
 
 from src.models.siamese import PaperSiameseModel
 from src.training.loop import eval_one_epoch
-from src.training.verification import find_best_threshold
+from src.evaluation.verification import find_best_threshold
 from src.evaluation.one_shot import evaluate_one_shot
 
 
@@ -119,7 +119,12 @@ def main() -> None:
 
     # Verification evaluation on test pairs
     te_stats, te_probs, te_labels = eval_one_epoch(model=model, loader=test_loader, device=device)
-    thr, acc_best = find_best_threshold(te_probs, te_labels)
+    res = find_best_threshold(te_probs, te_labels)
+    if isinstance(res, tuple) and len(res) == 2:
+        thr, acc_best = float(res[0]), float(res[1])
+    else:
+        thr = float(getattr(res, "thr_best", getattr(res, "thr", getattr(res, "threshold", 0.5))))
+        acc_best = float(getattr(res, "acc_best", getattr(res, "acc", getattr(res, "accuracy", 0.0))))
 
     # One-shot test evaluation (paper uses 400)
     os_cfg = cfg.get("one_shot", {})

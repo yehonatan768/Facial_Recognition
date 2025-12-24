@@ -9,10 +9,9 @@
 # PATHS (user-specific; required to run)
 # ------------------------------------------------------------
 paths:
-  # Option A (recommended): relative to project root
-  images_root: "images"
-  pairs_train: "assets/pairsDevTrain.txt"
-  pairs_test: "assets/pairsDevTest.txt"
+  images_root: "D:/Projects/Facial_Recognition/images"
+  pairs_train: "D:/Projects/Facial_Recognition/assets/pairsDevTrain.txt"
+  pairs_test:  "D:/Projects/Facial_Recognition/assets/pairsDevTest.txt"
 
   # Option B (Colab example): absolute paths (uncomment and edit)
   # images_root: "/content/Face_Recognition/images"
@@ -33,13 +32,12 @@ train:
 optim:
   optimizer: sgd
 
-  # learning rate decay: η(t) = 0.99 * η(t-1)
-  lr_decay: 0.99
+  lr: 0.01
+  lr_decay_gamma: 0.99
 
-  # momentum schedule
-  momentum_start: 0.5         # paper: momentum starts at 0.5
-  momentum_final: 0.9         # paper: final μ_j (same for all layers unless overridden)
-  momentum_ramp_epochs: 200   # linear ramp over full training
+  momentum_start: 0.5
+  momentum_final: 0.9
+  momentum_ramp_epochs: 20
 
   # layer-wise learning rates η_j
   # paper allows per-layer values; strict mode exposes them explicitly
@@ -104,7 +102,7 @@ model:
 # DATA (paths are user-specific; not paper-defined)
 # ------------------------------------------------------------
 data:
-  image_ext: ".png"           # Omniglot default; override if needed
+  image_ext: ".jpg"           # Omniglot default; override if needed
   strict_exists: true
 
 # ------------------------------------------------------------

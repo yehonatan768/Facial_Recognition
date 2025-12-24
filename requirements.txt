@@ -1,0 +1,14 @@
+# Core
+numpy
+pyyaml
+tqdm
+
+# ML
+torch
+torchvision
+torchaudio
+scikit-learn
+
+# Images / plots
+pillow
+matplotlib

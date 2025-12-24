@@ -6,21 +6,22 @@ from typing import Any, Dict, Optional, Union, Sequence
 import torch
 
 
+
 @dataclass
 class OptimBundle:
     optimizer: torch.optim.Optimizer
     scheduler: "PaperLrMomentumScheduler"
 
 
+def _as_float_list(x, n: int) -> list[float]:
+    if isinstance(x, (list, tuple)):
+        if len(x) != n:
+            raise ValueError(f"Expected momentum_final list of length {n}, got {x}")
+        return [float(v) for v in x]
+    return [float(x) for _ in range(n)]
+
+
 class PaperLrMomentumScheduler:
-    """
-    Paper-style schedule:
-      - LR decays multiplicatively each epoch: lr *= lr_decay (paper uses 0.99)
-      - Momentum ramps linearly from momentum_start (paper uses 0.5) to momentum_final
-
-    This class mutates optimizer.param_groups in-place.
-    """
-
     def __init__(
         self,
         optimizer: torch.optim.Optimizer,
@@ -33,55 +34,35 @@ class PaperLrMomentumScheduler:
         self.optimizer = optimizer
         self.lr_decay = float(lr_decay)
         self.momentum_start = float(momentum_start)
-        if isinstance(momentum_final, (list, tuple)):
-            self.momentum_final = [float(x) for x in momentum_final]
-        else:
-            self.momentum_final = None
-            self.momentum_final_scalar = float(momentum_final)
         self.momentum_ramp_epochs = max(1, int(momentum_ramp_epochs))
 
-        # Record baseline LRs per param group (so decay is consistent)
-        self.base_lrs = []
-        for g in self.optimizer.param_groups:
-            lr = float(g["lr"])
-            self.base_lrs.append(lr)
+        self.base_lrs = [float(g["lr"]) for g in self.optimizer.param_groups]
         if epoch0_lr is not None:
-            # override all group lrs at epoch 0
             for g in self.optimizer.param_groups:
                 g["lr"] = float(epoch0_lr)
             self.base_lrs = [float(epoch0_lr) for _ in self.base_lrs]
 
-    def _momentum_at(self, epoch: int) -> float:
-        # Linear ramp from start to final
-        t = min(max(epoch, 0), self.momentum_ramp_epochs) / float(self.momentum_ramp_epochs)
-        return self.momentum_start + t * (self.momentum_final - self.momentum_start)
+        self.momentum_finals = _as_float_list(momentum_final, n=len(self.optimizer.param_groups))
+
+    def _t(self, epoch: int) -> float:
+        return min(max(epoch, 0), self.momentum_ramp_epochs) / float(self.momentum_ramp_epochs)
 
     def step(self, epoch: int) -> Dict[str, float]:
-        """
-        Call once per epoch (typically at the start of the epoch).
-
-        Applies:
-          lr_group_i = base_lr_group_i * (lr_decay ** epoch)
-          momentum = linear_ramp(epoch)
-
-        Returns a dict with current lr (group0) and momentum.
-        """
-        mom = self._momentum_at(epoch)
+        t = self._t(epoch)
+        last_mom = None
 
         for i, g in enumerate(self.optimizer.param_groups):
             g["lr"] = self.base_lrs[i] * (self.lr_decay ** epoch)
 
             if "momentum" in g:
-                if self.momentum_final is not None:
-                    mom_final_i = self.momentum_final[i]
-                else:
-                    mom_final_i = self.momentum_final_scalar
+                mom_i = self.momentum_start + t * (self.momentum_finals[i] - self.momentum_start)
+                g["momentum"] = mom_i
+                last_mom = mom_i
 
-                t = min(max(epoch, 0), self.momentum_ramp_epochs) / float(self.momentum_ramp_epochs)
-                mom = self.momentum_start + t * (mom_final_i - self.momentum_start)
-                g["momentum"] = mom
+        if last_mom is None:
+            last_mom = self.momentum_start + t * (self.momentum_finals[0] - self.momentum_start)
 
-        return {"lr": float(self.optimizer.param_groups[0]["lr"]), "momentum": mom}
+        return {"lr": float(self.optimizer.param_groups[0]["lr"]), "momentum": float(last_mom)}
 
 
 def build_optimizer_and_scheduler(model: torch.nn.Module, cfg: Dict[str, Any]) -> OptimBundle:
@@ -137,7 +118,7 @@ def build_optimizer_and_scheduler(model: torch.nn.Module, cfg: Dict[str, Any]) -
         optimizer=optimizer,
         lr_decay=lr_decay,
         momentum_start=momentum_start,
-        momentum_final=[g.get("momentum_final", mu_fc) for g in optimizer.param_groups],
+        momentum_final=float(optim_cfg.get("momentum_final", 0.9)),
         momentum_ramp_epochs=momentum_ramp_epochs,
     )
     return OptimBundle(optimizer=optimizer, scheduler=scheduler)
