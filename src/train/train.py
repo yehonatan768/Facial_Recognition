@@ -15,9 +15,10 @@ from src.utils.read_model_config import read_model_config
 from src.data.load_pairs import parse_pairs_file, split_pairs
 from src.data.graph_split import split_by_components
 
-# --- Evaluation (paper-like) ---
+# --- Evaluation ---
 from src.train.evaluate import (
     evaluate_verification,
+    evaluate_verification_fixed_threshold,
     build_identity_index,
     sample_one_shot_trials,
     evaluate_one_shot,
@@ -25,7 +26,7 @@ from src.train.evaluate import (
 
 from src.data.transforms import PaperImageTransform
 from src.models.cnn_siamese import SiameseCNN, init_weights_like_paper
-from src.models.embeder import WeightedL1Embedder, SigmoidDecider, FullSiameseModel
+from src.models.embeder import WeightedL1Embedder, LogitDecider, FullSiameseModel
 
 
 class PairsPathDataset(Dataset):
@@ -102,15 +103,26 @@ def build_param_groups(full_model: FullSiameseModel, cfg: Dict[str, Any]) -> Lis
         }
     )
 
-    # alpha
+    # alpha (note: alpha_raw now)
     g_a = per_layer["alpha"]
     groups.append(
         {
-            "params": [full_model.embedder.alpha],
+            "params": [full_model.embedder.alpha_raw],
             "lr": float(g_a["lr"]),
             "momentum_final": float(g_a["momentum_final"]),
             "weight_decay": float(g_a["l2"]),
             "group_name": "alpha",
+        }
+    )
+
+    # decider bias (give it same schedule as alpha unless you add config)
+    groups.append(
+        {
+            "params": [full_model.decider.bias],
+            "lr": float(g_a["lr"]),
+            "momentum_final": float(g_a["momentum_final"]),
+            "weight_decay": 0.0,
+            "group_name": "bias",
         }
     )
 
@@ -134,8 +146,8 @@ def train_one_epoch(
         y = y.to(device)  # (B,1)
 
         opt.zero_grad(set_to_none=True)
-        p = model(x1, x2)  # (B,1) sigmoid
-        loss = loss_fn(p, y)
+        logits = model(x1, x2)  # (B,1) logits
+        loss = loss_fn(logits, y)
         loss.backward()
         opt.step()
 
@@ -154,8 +166,8 @@ def eval_loss(model: nn.Module, loader: DataLoader, loss_fn: nn.Module, device: 
         x1 = x1.to(device)
         x2 = x2.to(device)
         y = y.to(device)
-        p = model(x1, x2)
-        loss = loss_fn(p, y)
+        logits = model(x1, x2)
+        loss = loss_fn(logits, y)
         total += float(loss.item()) * x1.size(0)
         n += x1.size(0)
     return total / max(n, 1)
@@ -173,14 +185,13 @@ def main(config_path: str = "src/config/config.yaml") -> None:
     device = torch.device(cfg["device"])
 
     # ------------------------------------------------------------------
-    # Leakage-free train/val split FROM pairsDevTrain ONLY (graph components)
+    # Leakage-free train/val split FROM pairsDevTrain ONLY
     # ------------------------------------------------------------------
     pairs_train_path = Path(cfg["paths"]["pairs_train"])
     images_root = Path(cfg["paths"]["images_root"])
     ext = cfg["paths"].get("ext", ".jpg")
     strict_exists = bool(cfg["paths"].get("strict_exists", False))
 
-    # Parse all pairs from pairsDevTrain (LFW-style)
     pairs_pool = parse_pairs_file(
         pairs_txt=pairs_train_path,
         images_root=images_root,
@@ -238,11 +249,11 @@ def main(config_path: str = "src/config/config.yaml") -> None:
         embedding_dim=int(cfg["model"]["cnn"]["fc_units"]),
         alpha_init=float(cfg["model"]["embedder"]["alpha_init"]),
     )
-    decider = SigmoidDecider()
+    decider = LogitDecider()
     full = FullSiameseModel(siamese_cnn=siamese_cnn, embedder=embedder, decider=decider).to(device)
 
-    # loss (paper: sigmoid + cross-entropy) => BCELoss
-    loss_fn = nn.BCELoss()
+    # loss: logits + BCEWithLogitsLoss (stable)
+    loss_fn = nn.BCEWithLogitsLoss()
 
     # optimizer schedule
     schedule = cfg["train"]["schedule"]
@@ -251,7 +262,7 @@ def main(config_path: str = "src/config/config.yaml") -> None:
 
     param_groups = build_param_groups(full, cfg)
     for g in param_groups:
-        g["momentum"] = m_start  # start at 0.5 for all groups
+        g["momentum"] = m_start
 
     opt = torch.optim.SGD(param_groups)
 
@@ -259,22 +270,17 @@ def main(config_path: str = "src/config/config.yaml") -> None:
     patience = int(cfg["train"]["early_stop_patience"])
 
     # -------------------------
-    # Evaluation setup (paper-like)
+    # Evaluation setup
     # -------------------------
     eval_cfg = cfg.get("eval", {})
     verif_cfg = eval_cfg.get("verification", {})
     one_cfg = eval_cfg.get("one_shot", {})
 
     threshold_steps = int(verif_cfg.get("threshold_steps", 400))
-
-    # Optional one-shot episodic validation (closest analogue to paper protocol)
     use_one_shot = bool(one_cfg.get("enabled", False))
     oneshot_trials = None
 
     if use_one_shot:
-        # IMPORTANT: to avoid leakage, build index ONLY from validation identities
-        # selected by the graph split. This ensures one-shot validation is on unseen identities.
-        # We build the index by scanning folders, then filter by val IDs.
         full_index = build_identity_index(images_root)
         val_index = {k: v for k, v in full_index.items() if k in split_res.val_ids}
 
@@ -285,7 +291,6 @@ def main(config_path: str = "src/config/config.yaml") -> None:
             seed=int(one_cfg.get("seed", seed)),
         )
 
-    # Best metric (paper early-stops on one-shot validation error if enabled)
     best_metric = float("inf")
     bad = 0
 
@@ -298,12 +303,21 @@ def main(config_path: str = "src/config/config.yaml") -> None:
         train_loss = train_one_epoch(full, train_loader, opt, loss_fn, device)
         val_loss = eval_loss(full, val_loader, loss_fn, device)
 
-        # ---- evaluation (per epoch) ----
+        # Verification accuracy at fixed threshold 0.5
+        train_acc_05 = evaluate_verification_fixed_threshold(
+            model=full, loader=train_loader, device=device, thr=0.5, model_outputs_logits=True
+        )
+        val_acc_05 = evaluate_verification_fixed_threshold(
+            model=full, loader=val_loader, device=device, thr=0.5, model_outputs_logits=True
+        )
+
+        # Best-threshold verification metrics (secondary)
         verif_metrics = evaluate_verification(
             model=full,
             loader=val_loader,
             device=device,
             threshold_steps=threshold_steps,
+            model_outputs_logits=True,
         )
 
         oneshot_metrics = {}
@@ -311,37 +325,38 @@ def main(config_path: str = "src/config/config.yaml") -> None:
             oneshot_metrics = evaluate_one_shot(
                 model=full,
                 device=device,
-                transform=val_tf,  # IMPORTANT: no augmentation at eval
+                transform=val_tf,
                 trials=oneshot_trials,
+                model_outputs_logits=True,
             )
 
-        # LR decay 0.99 per epoch (uniformly)
+        # LR decay per epoch
         for g in opt.param_groups:
             g["lr"] = float(g["lr"]) * gamma
 
-        # ---- print like paper-style monitoring ----
+        # ---- improved print ----
         msg = (
             f"Epoch {epoch+1:03d}/{max_epochs} | "
             f"train_loss={train_loss:.6f} | val_loss={val_loss:.6f} | "
-            f"verif_acc(best_thr)={verif_metrics['val_verif_acc_best_thr']:.4f} "
-            f"thr={verif_metrics['val_verif_thr_best']:.3f} | "
+            f"train_acc@0.5={train_acc_05:.4f} | val_acc@0.5={val_acc_05:.4f} | "
+            f"val_best_acc={verif_metrics['verif_acc_best_thr']:.4f} "
+            f"best_thr={verif_metrics['verif_thr_best']:.3f} | "
         )
 
         if oneshot_metrics:
             msg += (
-                f"oneshot_acc={oneshot_metrics['val_oneshot_acc']:.4f} "
-                f"oneshot_err={oneshot_metrics['val_oneshot_err']:.4f} | "
+                f"oneshot_acc={oneshot_metrics['oneshot_acc']:.4f} "
+                f"oneshot_err={oneshot_metrics['oneshot_err']:.4f} | "
             )
 
         msg += f"lr0={opt.param_groups[0]['lr']:.6g} | m0={opt.param_groups[0]['momentum']:.3f}"
         print(msg)
 
         # ---- early stopping metric ----
-        # Paper: stop based on one-shot validation error (if enabled)
         if oneshot_metrics:
-            current_metric = float(oneshot_metrics["val_oneshot_err"])  # minimize
+            current_metric = float(oneshot_metrics["oneshot_err"])
         else:
-            current_metric = float(val_loss)  # minimize
+            current_metric = float(val_loss)
 
         if current_metric < best_metric - 1e-6:
             best_metric = current_metric

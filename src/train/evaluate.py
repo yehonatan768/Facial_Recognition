@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Sequence, Tuple, Optional
+from typing import Callable, Dict, List, Sequence, Tuple
 
 import torch
 import torch.nn as nn
@@ -18,13 +18,15 @@ def collect_pair_probs_and_labels(
     model: nn.Module,
     loader: torch.utils.data.DataLoader,
     device: torch.device,
+    model_outputs_logits: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Returns:
       probs:  (N,) float tensor in [0,1]
       labels: (N,) float tensor in {0,1}
     Assumes loader yields (x1, x2, y) with y shape (B,1) or (B,)
-    and model(x1,x2) returns sigmoid probability (B,1) or (B,).
+    If model_outputs_logits=True then model(x1,x2) returns logits (B,1)/(B,)
+    and we apply sigmoid() here.
     """
     model.eval()
     probs_all: List[torch.Tensor] = []
@@ -35,8 +37,11 @@ def collect_pair_probs_and_labels(
         x2 = x2.to(device)
         y = y.to(device)
 
-        p = model(x1, x2)
-        p = p.view(-1).detach().cpu()
+        out = model(x1, x2).view(-1)
+        if model_outputs_logits:
+            out = torch.sigmoid(out)
+
+        p = out.detach().cpu()
         y = y.view(-1).detach().cpu()
 
         probs_all.append(p)
@@ -59,12 +64,10 @@ def find_best_threshold(
 ) -> Tuple[float, float]:
     """
     Grid-search threshold in [0,1] and return (best_acc, best_thr).
-    Paper reports "best checkpoint and threshold" for verification. :contentReference[oaicite:3]{index=3}
     """
     best_acc = -1.0
     best_thr = 0.5
 
-    # include endpoints
     for i in range(num_steps + 1):
         thr = i / float(num_steps)
         acc = accuracy_at_threshold(probs, labels, thr)
@@ -81,18 +84,31 @@ def evaluate_verification(
     loader: torch.utils.data.DataLoader,
     device: torch.device,
     threshold_steps: int = 400,
+    model_outputs_logits: bool = True,
 ) -> Dict[str, float]:
-    probs, labels = collect_pair_probs_and_labels(model, loader, device)
+    probs, labels = collect_pair_probs_and_labels(model, loader, device, model_outputs_logits=model_outputs_logits)
     best_acc, best_thr = find_best_threshold(probs, labels, num_steps=threshold_steps)
 
     # also provide acc at 0.5 for quick sanity checks
     acc_05 = accuracy_at_threshold(probs, labels, 0.5)
 
     return {
-        "val_verif_acc_best_thr": float(best_acc),
-        "val_verif_thr_best": float(best_thr),
-        "val_verif_acc_thr_0.5": float(acc_05),
+        "verif_acc_best_thr": float(best_acc),
+        "verif_thr_best": float(best_thr),
+        "verif_acc_thr_0.5": float(acc_05),
     }
+
+
+@torch.no_grad()
+def evaluate_verification_fixed_threshold(
+    model: nn.Module,
+    loader: torch.utils.data.DataLoader,
+    device: torch.device,
+    thr: float = 0.5,
+    model_outputs_logits: bool = True,
+) -> float:
+    probs, labels = collect_pair_probs_and_labels(model, loader, device, model_outputs_logits=model_outputs_logits)
+    return accuracy_at_threshold(probs, labels, thr)
 
 
 # -----------------------------
@@ -100,11 +116,6 @@ def evaluate_verification(
 # -----------------------------
 @dataclass(frozen=True)
 class OneShotTrial:
-    """
-    N-way 1-shot trial:
-      support: list of (class_id, image_path) length = N
-      query:   (true_class_id, image_path)
-    """
     support: List[Tuple[str, Path]]
     query: Tuple[str, Path]
 
@@ -114,11 +125,6 @@ def _is_image_file(p: Path) -> bool:
 
 
 def build_identity_index(images_root: Path) -> Dict[str, List[Path]]:
-    """
-    Build {identity_name: [img_paths...]} from folder structure:
-      images_root/<identity>/<identity>_0001.jpg ...
-    Your dataset is organized this way already (pairs format).
-    """
     out: Dict[str, List[Path]] = {}
     for d in images_root.iterdir():
         if not d.is_dir():
@@ -135,11 +141,6 @@ def sample_one_shot_trials(
     num_trials: int,
     seed: int = 0,
 ) -> List[OneShotTrial]:
-    """
-    Generic N-way 1-shot sampling (not Omniglot drawer-based).
-    Paper's Omniglot one-shot protocol is drawer-based; this is the closest analogue
-    for your identity-folder face dataset.
-    """
     rng = random.Random(seed)
     classes = [c for c, imgs in index.items() if len(imgs) >= 2]
     if len(classes) < num_way:
@@ -156,13 +157,10 @@ def sample_one_shot_trials(
             support_img = rng.choice(imgs)
             support.append((c, support_img))
 
-        # query must be different image from the true class
         true_imgs = index[true_c]
-        # avoid picking the exact same file as the support for that class
         support_true_path = next(p for (c, p) in support if c == true_c)
         candidates = [p for p in true_imgs if p != support_true_path]
         if not candidates:
-            # extremely rare if class has exactly 1 image; we filtered >=2, but keep safe
             candidates = true_imgs
         query_img = rng.choice(candidates)
 
@@ -177,13 +175,8 @@ def evaluate_one_shot(
     device: torch.device,
     transform: Callable[[Image.Image], torch.Tensor],
     trials: Sequence[OneShotTrial],
+    model_outputs_logits: bool = True,
 ) -> Dict[str, float]:
-    """
-    For each trial:
-      - compute similarity prob p(query, support_i) for i=1..N
-      - predict class of max prob
-    Paper: choose class with maximum similarity score. :contentReference[oaicite:4]{index=4}
-    """
     model.eval()
     correct = 0
 
@@ -196,7 +189,11 @@ def evaluate_one_shot(
 
         for c, s_path in t.support:
             s_img = transform(Image.open(s_path)).unsqueeze(0).to(device)
-            p = model(q_img, s_img).view(-1)[0].item()
+            out = model(q_img, s_img).view(-1)[0]
+            if model_outputs_logits:
+                p = torch.sigmoid(out).item()
+            else:
+                p = out.item()
 
             if best_score is None or p > best_score:
                 best_score = p
@@ -208,18 +205,7 @@ def evaluate_one_shot(
     acc = correct / max(len(trials), 1)
     err = 1.0 - acc
     return {
-        "val_oneshot_acc": float(acc),
-        "val_oneshot_err": float(err),
-        "val_oneshot_trials": float(len(trials)),
+        "oneshot_acc": float(acc),
+        "oneshot_err": float(err),
+        "oneshot_trials": float(len(trials)),
     }
-
-
-def choose_early_stop_metric(metrics: Dict[str, float], prefer_one_shot: bool) -> Tuple[str, float]:
-    """
-    Paper stops based on one-shot validation error (320 tasks). :contentReference[oaicite:5]{index=5}
-    If prefer_one_shot=True and oneshot metrics exist -> minimize oneshot_err
-    else -> minimize val_loss (handled in train.py).
-    """
-    if prefer_one_shot and "val_oneshot_err" in metrics:
-        return "val_oneshot_err", metrics["val_oneshot_err"]
-    return "val_loss", metrics.get("val_loss", float("inf"))
