@@ -355,7 +355,3 @@ def main(config_path: str = "src/config/config.yaml") -> None:
 
     print(f"Best metric: {best_metric:.6f}")
     print("Saved checkpoint: siamese_paper_best.pt")
-
-
-if __name__ == "__main__":
-    main()
