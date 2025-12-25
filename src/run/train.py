@@ -212,7 +212,7 @@ def main() -> None:
 
     # Resume if provided
     start_epoch = 1
-    best_score = float("inf")  # we minimize one-shot error
+    best_score = -float("inf")  # we minimize one-shot error
     if args.resume:
         ckpt = torch.load(args.resume, map_location="cpu")
         model.load_state_dict(ckpt["model_state"], strict=True)
@@ -308,9 +308,9 @@ def main() -> None:
         # Save last
         _save_ckpt(ckpt_last, model, optimizer, epoch, best_score, cfg)
 
-        # Paper: select best epoch by lowest one-shot validation error
-        score = oneshot_err if oneshot_enabled else float(va_stats.loss)
-        improved = score < best_score
+        # Select best epoch by highest validation accuracy
+        score = float(va_stats.acc)
+        improved = score > best_score
         if improved:
             best_score = score
             _save_ckpt(ckpt_best, model, optimizer, epoch, best_score, cfg)

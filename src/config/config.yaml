@@ -9,14 +9,14 @@
 # PATHS (user-specific; required to run)
 # ------------------------------------------------------------
 paths:
-  images_root: "D:/Projects/Facial_Recognition/images"
-  pairs_train: "D:/Projects/Facial_Recognition/assets/pairsDevTrain.txt"
-  pairs_test:  "D:/Projects/Facial_Recognition/assets/pairsDevTest.txt"
+  # images_root: "D:/Projects/Facial_Recognition/images"
+  # pairs_train: "D:/Projects/Facial_Recognition/assets/pairsDevTrain.txt"
+  # pairs_test:  "D:/Projects/Facial_Recognition/assets/pairsDevTest.txt"
 
   # Option B (Colab example): absolute paths (uncomment and edit)
-  # images_root: "/content/Face_Recognition/images"
-  # pairs_train: "/content/Face_Recognition/assets/pairsDevTrain.txt"
-  # pairs_test: "/content/Face_Recognition/assets/pairsDevTest.txt"
+  images_root: "/content/Face_Recognition/images"
+  pairs_train: "/content/Face_Recognition/assets/pairsDevTrain.txt"
+  pairs_test: "/content/Face_Recognition/assets/pairsDevTest.txt"
 
 # ------------------------------------------------------------
 # TRAINING
