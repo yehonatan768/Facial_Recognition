@@ -36,8 +36,8 @@ optim:
   lr_decay_gamma: 0.99
 
   momentum_start: 0.5
-  momentum_final: 0.9
-  momentum_ramp_epochs: 20
+  momentum_final: 0.7
+  momentum_ramp_epochs: 150
 
   # layer-wise learning rates η_j
   # paper allows per-layer values; strict mode exposes them explicitly
