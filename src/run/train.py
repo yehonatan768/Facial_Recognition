@@ -4,7 +4,7 @@ import argparse
 import json
 import random
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import numpy as np
 import torch
@@ -32,14 +32,8 @@ def _project_root() -> Path:
 
 
 def _default_config_path() -> Path:
-    return  "src/config/config.yaml"
-
-
-def _resolve_under_root(p: Path) -> Path:
-    # If user gave a relative path in config.yaml, interpret it as project-root-relative
-    if p.is_absolute():
-        return p
-    return (_project_root() / p).resolve()
+    # keep as string path in project
+    return Path("src/config/config.yaml")
 
 
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
@@ -74,6 +68,7 @@ def _resolve_paths(cfg: Dict[str, Any], args) -> Dict[str, Path]:
     images_root = Path(args.images_root or paths.get("images_root", "images"))
     pairs_train = Path(args.pairs_train or paths.get("pairs_train", "assets/pairsDevTrain.txt"))
     pairs_test = Path(args.pairs_test or paths.get("pairs_test", "assets/pairsDevTest.txt"))
+
     missing = []
     if not str(images_root):
         missing.append("images_root")
@@ -83,18 +78,29 @@ def _resolve_paths(cfg: Dict[str, Any], args) -> Dict[str, Path]:
         missing.append("pairs_test")
     if missing:
         raise ValueError(
-            f"Missing required paths: {missing}. Provide in config under paths: "
+            f"Missing required paths: {missing}. Provide them in config under paths "
             f"or via CLI flags --images-root/--pairs-train/--pairs-test."
         )
 
-    return {
-        "images_root": images_root,
-        "pairs_train": pairs_train,
-        "pairs_test": pairs_test,
-    }
+    # Interpret relative paths as project-root-relative (common expectation)
+    if not images_root.is_absolute():
+        images_root = (_project_root() / images_root).resolve()
+    if not pairs_train.is_absolute():
+        pairs_train = (_project_root() / pairs_train).resolve()
+    if not pairs_test.is_absolute():
+        pairs_test = (_project_root() / pairs_test).resolve()
+
+    return {"images_root": images_root, "pairs_train": pairs_train, "pairs_test": pairs_test}
 
 
-def _save_ckpt(path: Path, model: torch.nn.Module, optim: torch.optim.Optimizer, epoch: int, best: float, cfg: Dict[str, Any]) -> None:
+def _save_ckpt(
+    path: Path,
+    model: torch.nn.Module,
+    optim: torch.optim.Optimizer,
+    epoch: int,
+    best: float,
+    cfg: Dict[str, Any],
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
         {
@@ -110,12 +116,7 @@ def _save_ckpt(path: Path, model: torch.nn.Module, optim: torch.optim.Optimizer,
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument(
-        "--config",
-        type=str,
-        default="",
-        help="Optional. If omitted, uses src/config/config.yaml",
-    )
+    ap.add_argument("--config", type=str, default="", help="Optional. If omitted, uses src/config/config.yaml")
     ap.add_argument("--defaults", type=str, default="", help="Optional defaults YAML (paper defaults).")
     ap.add_argument("--workdir", type=str, default="outputs", help="Where to write checkpoints/logs.")
     ap.add_argument("--device", type=str, default="auto", help="auto|cpu|cuda|cuda:0")
@@ -167,9 +168,9 @@ def main() -> None:
     if len(train_pairs_all) == 0:
         raise RuntimeError(
             "No training pairs were loaded (all pairs filtered out as missing).\n"
-            f"images_root={images_root.resolve()}\n"
-            f"pairs_train={pairs_train_path.resolve()}\n"
-            f"pairs_test={pairs_test_path.resolve()}\n"
+            f"images_root={images_root}\n"
+            f"pairs_train={pairs_train_path}\n"
+            f"pairs_test={pairs_test_path}\n"
             f"ext={ext!r} strict_exists={strict_exists}\n\n"
             "Likely causes:\n"
             "1) Wrong images_root (folder does not contain identity subfolders)\n"
@@ -177,7 +178,7 @@ def main() -> None:
             "3) Pair file format does not match dataset naming\n"
         )
 
-    # Split train into train/val without identity leakage (your graph split)
+    # Split train into train/val without identity leakage (graph split)
     split_cfg = cfg.get("split", {})
     split_res = split_by_components(
         pairs=train_pairs_all,
@@ -188,11 +189,10 @@ def main() -> None:
     train_pairs = split_res.train_pairs
     val_pairs = split_res.val_pairs
 
-    # DataLoaders (uses PaperImageTransform through your datasets.py)
+    # DataLoaders
     loaders = build_pair_loaders(cfg=cfg, train_pairs=train_pairs, val_pairs=val_pairs, test_pairs=test_pairs)
     train_loader = loaders.train_loader
     val_loader = loaders.val_loader
-    test_loader = loaders.test_loader  # optional
 
     # Model
     model_cfg = cfg.get("model", {})
@@ -202,17 +202,16 @@ def main() -> None:
         embedding_dim=int(model_cfg.get("embedding_dim", 4096)),
     ).to(device)
 
-    # Paper initialization (conv + fc + alpha as fc)
     init_weights_like_paper(model)
 
-    # Optim + scheduler (paper lr decay + momentum ramp, potentially layer-wise)
+    # Optim + scheduler
     optim_bundle = build_optimizer_and_scheduler(model=model, cfg=cfg)
     optimizer = optim_bundle.optimizer
     scheduler = optim_bundle.scheduler
 
     # Resume if provided
     start_epoch = 1
-    best_score = -float("inf")  # maximize verif_acc_best
+    best_score = -float("inf")  # we will MAXIMIZE verif_acc_best
     if args.resume:
         ckpt = torch.load(args.resume, map_location="cpu")
         model.load_state_dict(ckpt["model_state"], strict=True)
@@ -221,10 +220,14 @@ def main() -> None:
         best_score = float(ckpt.get("best_score", best_score))
         logger.info(f"Resumed from {args.resume} (start_epoch={start_epoch}, best_score={best_score:.6f})")
 
-    # Early stopping: paper uses patience 20 on one-shot validation error
+    # Early stopping should MAXIMIZE (we're selecting best by verif_acc_best)
     es_cfg = cfg.get("early_stop", {})
     patience = int(es_cfg.get("patience", 20))
-    early = EarlyStopping(patience=patience, min_delta=float(es_cfg.get("min_delta", 0.0)), maximize=False)
+    early = EarlyStopping(
+        patience=patience,
+        min_delta=float(es_cfg.get("min_delta", 0.0)),
+        maximize=True,
+    )
 
     epochs = int(cfg.get("train", {}).get("epochs", 200))
     metrics_path = workdir / "metrics.jsonl"
@@ -232,7 +235,7 @@ def main() -> None:
     ckpt_best = ckpt_dir / "best.pt"
     ckpt_last = ckpt_dir / "last.pt"
 
-    # One-shot settings
+    # One-shot settings (still computed + saved; optional to plot later)
     os_cfg = cfg.get("one_shot", {})
     oneshot_enabled = bool(os_cfg.get("enabled", True))
     n_way = int(os_cfg.get("n_way", 20))
@@ -243,26 +246,24 @@ def main() -> None:
     logger.info(f"epochs={epochs} batch_size={cfg.get('train', {}).get('batch_size', '??')} oneshot_enabled={oneshot_enabled}")
 
     for epoch in range(start_epoch, epochs + 1):
-        # Scheduler is epoch-based (paper)
-        sched_info = None
+        # Paper schedule is epoch-based; we apply before the epoch’s updates.
         if scheduler is not None:
-            sched_info = scheduler.step(epoch - 1)  # keep your current convention
+            scheduler.step(epoch - 1)
 
         tr_stats = train_one_epoch(model=model, loader=train_loader, device=device, optimizer=optimizer)
         va_stats, va_probs, va_labels = eval_one_epoch(model=model, loader=val_loader, device=device)
 
-        # Verification best threshold on VAL
+        # Less-noisy validation accuracy: best threshold on the full val set
         res = find_best_threshold(va_probs, va_labels)
 
-        # Support both legacy tuple return and VerificationResult dataclass.
+        # Support tuple return or dataclass
         if isinstance(res, tuple) and len(res) == 2:
-            thr, ver_acc = float(res[0]), float(res[1])
+            thr = float(res[0])
+            ver_acc_best = float(res[1])
         else:
-            # Your VerificationResult uses best_thr / best_acc
-            thr = float(getattr(res, "best_thr", getattr(res, "thr", getattr(res, "threshold", 0.5))))
-            ver_acc = float(getattr(res, "best_acc", getattr(res, "acc", getattr(res, "accuracy", 0.0))))
+            thr = float(getattr(res, "best_thr", getattr(res, "thr_best", getattr(res, "thr", 0.5))))
+            ver_acc_best = float(getattr(res, "best_acc", getattr(res, "acc_best", getattr(res, "acc", 0.0))))
 
-        # One-shot validation (paper monitors error)
         oneshot_acc = float("nan")
         oneshot_err = float("nan")
         if oneshot_enabled:
@@ -273,38 +274,46 @@ def main() -> None:
                 device=device,
                 n_way=n_way,
                 n_trials=val_trials,
-                seed=seed_base + epoch,  # change per epoch => new random tasks
+                seed=seed_base + epoch,  # different random tasks per epoch
                 ext=ext,
             )
             oneshot_acc = float(os.accuracy)
             oneshot_err = 1.0 - oneshot_acc
 
-        # Log learning-rate + momentum (show per-group)
+        # Log: do NOT print val_acc / val_loss
         lrs = [float(g["lr"]) for g in optimizer.param_groups]
         moms = [float(g.get("momentum", 0.0)) for g in optimizer.param_groups]
-        # Keep lr0/m0 for backward compatibility in metrics.jsonl
-        lr0 = lrs[0]
-        m0 = moms[0]
+        lrs_s = ",".join([f"{x:.6g}" for x in lrs])
+        moms_s = ",".join([f"{x:.3f}" for x in moms])
+
         logger.info(
             f"Epoch {epoch:03d}/{epochs:03d} | "
             f"train_acc={tr_stats.acc:.4f} train_loss={tr_stats.loss:.6f} | "
-            f"val_acc={va_stats.acc:.4f} val_loss={va_stats.loss:.6f} | "
+            f"verif_acc_best={ver_acc_best:.4f} thr={thr:.3f} | "
             f"oneshot_acc={oneshot_acc:.4f} oneshot_err={oneshot_err:.4f} | "
-            f"lrs={','.join(f'{x:.6g}' for x in lrs)} | "
-            f"moms={','.join(f'{x:.3f}' for x in moms)}"
+            f"lrs={lrs_s} | moms={moms_s}"
         )
 
+        # Save metrics for later plotting
         row = {
-            "epoch": epoch,
+            "epoch": int(epoch),
             "train_loss": float(tr_stats.loss),
             "train_acc": float(tr_stats.acc),
+
+            # still saved (even though not printed)
             "val_loss": float(va_stats.loss),
-            "val_acc": float(va_stats.acc),
-            "verif_acc_best": float(ver_acc),
+
+            # less-noisy validation accuracy to plot
+            "verif_acc_best": float(ver_acc_best),
+            "verif_thr": float(thr),
+
+            # optional diagnostics
             "oneshot_acc": float(oneshot_acc),
             "oneshot_err": float(oneshot_err),
-            "lr0": lr0,
-            "m0": m0,
+
+            # full groups (not just group0)
+            "lrs": [float(x) for x in lrs],
+            "moms": [float(x) for x in moms],
         }
         with metrics_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(row) + "\n")
@@ -312,13 +321,11 @@ def main() -> None:
         # Save last
         _save_ckpt(ckpt_last, model, optimizer, epoch, best_score, cfg)
 
-        # Select best epoch by highest verification accuracy on VAL (best threshold)
-        score = float(ver_acc)  # verif_acc_best
-        improved = score > best_score
-        if improved:
+        # Best model selection: maximize verif_acc_best (less noisy than raw val_acc)
+        score = float(ver_acc_best)
+        if score > best_score:
             best_score = score
             _save_ckpt(ckpt_best, model, optimizer, epoch, best_score, cfg)
-
 
         # Early stop
         if early.update(epoch=epoch, score=score).should_stop:

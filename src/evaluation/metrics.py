@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import random
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,7 +22,7 @@ class OneShotResult:
 def build_class_to_images(images_root: Path, ext: str = ".jpg") -> Dict[str, List[Path]]:
     """
     Builds a mapping: class_name (folder) -> list of image paths.
-    Compatible with your LFW-style folder layout used by load_pairs.py. :contentReference[oaicite:3]{index=3}
+    Compatible with your LFW-style folder layout used by load_pairs.py.
     """
     class_to_imgs: Dict[str, List[Path]] = {}
     for person_dir in images_root.iterdir():
@@ -99,19 +100,15 @@ def evaluate_one_shot(
                 support_paths.append(q_support_path)
                 support_labels.append(1)
             else:
-                # just pick one support image from that class
                 support_paths.append(rng.choice(class_to_imgs[c]))
                 support_labels.append(0)
 
-        # Load and transform images
         q_img = transform(load_image_rgb(q_path))  # (1,H,W)
         supports = [transform(load_image_rgb(p)) for p in support_paths]
 
-        # Batch into tensors
         q_batch = torch.stack([q_img] * n_way, dim=0).to(device)  # (N,1,H,W)
         s_batch = torch.stack(supports, dim=0).to(device)         # (N,1,H,W)
 
-        # Score all comparisons at once (vectorized)
         if hasattr(model, "score"):
             p = model.score(q_batch, s_batch)  # (N,1)
         else:
@@ -125,3 +122,70 @@ def evaluate_one_shot(
 
     acc = correct / float(n_trials) if n_trials > 0 else 0.0
     return OneShotResult(accuracy=acc, n_trials=n_trials, n_way=n_way)
+
+
+# -------------------------------------------------------------------
+# New: metrics.jsonl loading + plotting utilities
+# -------------------------------------------------------------------
+
+def load_metrics_jsonl(path: Path) -> Dict[str, List[float]]:
+    """
+    Loads the training log saved by train.py (metrics.jsonl) into column lists.
+
+    Expected keys (depending on your run):
+      - epoch
+      - train_loss, val_loss
+      - train_acc, verif_acc_best
+      - (optional) verif_thr, oneshot_acc, oneshot_err, lrs, moms
+    """
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"metrics.jsonl not found: {path}")
+
+    cols: Dict[str, List] = {}
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            row = json.loads(line)
+            for k, v in row.items():
+                cols.setdefault(k, []).append(v)
+    return cols
+
+
+def plot_train_val_curves(metrics_jsonl: Path) -> None:
+    """
+    Plots:
+      - train_loss vs val_loss
+      - train_acc vs verif_acc_best  (less noisy validation accuracy)
+    """
+    import matplotlib.pyplot as plt  # local import (keeps core deps minimal)
+
+    cols = load_metrics_jsonl(metrics_jsonl)
+
+    epoch = cols.get("epoch")
+    if epoch is None:
+        raise ValueError("metrics.jsonl missing 'epoch' column")
+
+    # Loss plot
+    if "train_loss" in cols and "val_loss" in cols:
+        plt.figure()
+        plt.plot(epoch, cols["train_loss"], label="train_loss")
+        plt.plot(epoch, cols["val_loss"], label="val_loss")
+        plt.xlabel("epoch")
+        plt.ylabel("loss")
+        plt.legend()
+        plt.title("Loss vs Epoch")
+        plt.show()
+
+    # Accuracy plot (use verif_acc_best as the validation curve)
+    if "train_acc" in cols and "verif_acc_best" in cols:
+        plt.figure()
+        plt.plot(epoch, cols["train_acc"], label="train_acc")
+        plt.plot(epoch, cols["verif_acc_best"], label="val_verif_acc_best")
+        plt.xlabel("epoch")
+        plt.ylabel("accuracy")
+        plt.legend()
+        plt.title("Accuracy vs Epoch")
+        plt.show()
