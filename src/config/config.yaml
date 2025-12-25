@@ -1,34 +1,35 @@
 # ============================================================
-# Koch et al. (2015) — STRICT PAPER DEFAULTS
-# ============================================================
-# This file intentionally contains NO tuning freedom.
-# If any value is changed, the implementation is no longer 1:1.
+# Koch et al. (2015) — PAPER DEFAULTS (PAIR TRAINING ONLY)
+# One-shot / verification evaluation removed per project update.
 # ============================================================
 
-# ------------------------------------------------------------
-# PATHS (user-specific; required to run)
-# ------------------------------------------------------------
+# ----------------------------
+# PATHS (required to run)
+# ----------------------------
 paths:
-  # images_root: "D:/Projects/Facial_Recognition/images"
-  # pairs_train: "D:/Projects/Facial_Recognition/assets/pairsDevTrain.txt"
-  # pairs_test:  "D:/Projects/Facial_Recognition/assets/pairsDevTest.txt"
-
-  # Option B (Colab example): absolute paths (uncomment and edit)
   images_root: "/content/Face_Recognition/images"
   pairs_train: "/content/Face_Recognition/assets/pairsDevTrain.txt"
-  pairs_test: "/content/Face_Recognition/assets/pairsDevTest.txt"
+  pairs_test:  "/content/Face_Recognition/assets/pairsDevTest.txt"
 
-# ------------------------------------------------------------
+# ----------------------------
 # TRAINING
-# ------------------------------------------------------------
+# ----------------------------
 train:
-  epochs: 200                 # paper: train up to 200 epochs
-  batch_size: 128             # paper: minibatch size = 128
-  seed: 0                     # paper does not specify; fixed for reproducibility
+  epochs: 200
+  batch_size: 128
+  seed: 0
 
-# ------------------------------------------------------------
-# OPTIMIZATION (paper Section 3.1)
-# ------------------------------------------------------------
+# ----------------------------
+# SPLIT (graph split train->train/val)
+# ----------------------------
+split:
+  val_ratio: 0.14
+  min_val_identities: 150
+  seed: 0
+
+# ----------------------------
+# OPTIMIZATION (paper schedule)
+# ----------------------------
 optim:
   optimizer: sgd
 
@@ -39,50 +40,32 @@ optim:
   momentum_final: 0.7
   momentum_ramp_epochs: 150
 
-  # layer-wise learning rates η_j
-  # paper allows per-layer values; strict mode exposes them explicitly
+  # layer-wise learning rates
   lr_conv: 0.01
   lr_fc: 0.01
   lr_alpha: 0.01
 
-  # layer-wise L2 regularization λ_j
-  # paper: L2 penalty is part of the objective
+  # layer-wise L2 regularization
   weight_decay_conv: 0.0
   weight_decay_fc: 0.0
   weight_decay_alpha: 0.0
 
-# ------------------------------------------------------------
-# EARLY STOPPING (paper Section 3.1)
-# ------------------------------------------------------------
+# ----------------------------
+# EARLY STOPPING
+# ----------------------------
 early_stop:
   enabled: true
-  patience: 20                # paper: stop if no improvement for 20 epochs
-  monitor: one_shot_err       # paper: validation error (not accuracy)
-  mode: min                   # minimize error
+  patience: 20
+  min_delta: 0.0
+  monitor: val_loss   # val_loss | val_acc
+  mode: min           # min | max
 
-# ------------------------------------------------------------
-# ONE-SHOT EVALUATION (paper protocol)
-# ------------------------------------------------------------
-one_shot:
-  enabled: true
-
-  # paper Omniglot protocol
-  protocol: omniglot_paper
-
-  n_way: 20                   # 20-way classification
-  val_trials: 320             # paper: 320 validation one-shot tasks
-  test_trials: 400            # paper: 400 test one-shot tasks
-
-# ------------------------------------------------------------
+# ----------------------------
 # IMAGE TRANSFORMS (paper affine distortion)
-# ------------------------------------------------------------
+# ----------------------------
 transform:
-  input_size: 105             # paper: 105x105 grayscale input
-
-  # each component included independently with probability 0.5
+  input_size: 105
   component_apply_prob: 0.5
-
-  # parameter ranges (paper Section 3.1)
   rotation_deg: [-10.0, 10.0]
   shear_x: [-0.3, 0.3]
   shear_y: [-0.3, 0.3]
@@ -91,23 +74,23 @@ transform:
   translate_x: [-2.0, 2.0]
   translate_y: [-2.0, 2.0]
 
-# ------------------------------------------------------------
-# MODEL (architecture is fixed in code)
-# ------------------------------------------------------------
+# ----------------------------
+# MODEL
+# ----------------------------
 model:
-  in_channels: 1              # grayscale
-  embedding_dim: 4096         # paper: final FC layer size
+  in_channels: 1
+  embedding_dim: 4096
 
-# ------------------------------------------------------------
-# DATA (paths are user-specific; not paper-defined)
-# ------------------------------------------------------------
+# ----------------------------
+# DATA
+# ----------------------------
 data:
-  image_ext: ".jpg"           # Omniglot default; override if needed
+  image_ext: ".jpg"
   strict_exists: true
 
-# ------------------------------------------------------------
+# ----------------------------
 # RUNTIME
-# ------------------------------------------------------------
+# ----------------------------
 runtime:
   num_workers: 2
   pin_memory: true

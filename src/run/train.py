@@ -22,9 +22,6 @@ from src.training.optim import build_optimizer_and_scheduler
 from src.training.loop import train_one_epoch, eval_one_epoch
 from src.training.early_stop import EarlyStopping
 
-from src.evaluation.verification import find_best_threshold
-from src.evaluation.one_shot import evaluate_one_shot
-
 
 def _project_root() -> Path:
     # src/run/train.py -> parents[2] == project root
@@ -32,7 +29,6 @@ def _project_root() -> Path:
 
 
 def _default_config_path() -> Path:
-    # keep as string path in project
     return Path("src/config/config.yaml")
 
 
@@ -69,20 +65,7 @@ def _resolve_paths(cfg: Dict[str, Any], args) -> Dict[str, Path]:
     pairs_train = Path(args.pairs_train or paths.get("pairs_train", "assets/pairsDevTrain.txt"))
     pairs_test = Path(args.pairs_test or paths.get("pairs_test", "assets/pairsDevTest.txt"))
 
-    missing = []
-    if not str(images_root):
-        missing.append("images_root")
-    if not str(pairs_train):
-        missing.append("pairs_train")
-    if not str(pairs_test):
-        missing.append("pairs_test")
-    if missing:
-        raise ValueError(
-            f"Missing required paths: {missing}. Provide them in config under paths "
-            f"or via CLI flags --images-root/--pairs-train/--pairs-test."
-        )
-
-    # Interpret relative paths as project-root-relative (common expectation)
+    # Interpret relative paths as project-root-relative
     if not images_root.is_absolute():
         images_root = (_project_root() / images_root).resolve()
     if not pairs_train.is_absolute():
@@ -171,11 +154,7 @@ def main() -> None:
             f"images_root={images_root}\n"
             f"pairs_train={pairs_train_path}\n"
             f"pairs_test={pairs_test_path}\n"
-            f"ext={ext!r} strict_exists={strict_exists}\n\n"
-            "Likely causes:\n"
-            "1) Wrong images_root (folder does not contain identity subfolders)\n"
-            "2) Wrong image_ext (e.g., config says .png but files are .jpg)\n"
-            "3) Pair file format does not match dataset naming\n"
+            f"ext={ext!r} strict_exists={strict_exists}\n"
         )
 
     # Split train into train/val without identity leakage (graph split)
@@ -202,6 +181,7 @@ def main() -> None:
         embedding_dim=int(model_cfg.get("embedding_dim", 4096)),
     ).to(device)
 
+    # Paper init (your existing implementation)
     init_weights_like_paper(model)
 
     # Optim + scheduler
@@ -211,7 +191,7 @@ def main() -> None:
 
     # Resume if provided
     start_epoch = 1
-    best_score = -float("inf")  # we will MAXIMIZE verif_acc_best
+    best_score = float("inf")  # minimize by default if monitoring val_loss
     if args.resume:
         ckpt = torch.load(args.resume, map_location="cpu")
         model.load_state_dict(ckpt["model_state"], strict=True)
@@ -220,14 +200,22 @@ def main() -> None:
         best_score = float(ckpt.get("best_score", best_score))
         logger.info(f"Resumed from {args.resume} (start_epoch={start_epoch}, best_score={best_score:.6f})")
 
-    # Early stopping should MAXIMIZE (we're selecting best by verif_acc_best)
-    es_cfg = cfg.get("early_stop", {})
+    # Early stopping
+    es_cfg = cfg.get("early_stop", {}) or {}
+    es_enabled = bool(es_cfg.get("enabled", True))
     patience = int(es_cfg.get("patience", 20))
-    early = EarlyStopping(
-        patience=patience,
-        min_delta=float(es_cfg.get("min_delta", 0.0)),
-        maximize=True,
-    )
+    min_delta = float(es_cfg.get("min_delta", 0.0))
+    monitor = str(es_cfg.get("monitor", "val_loss"))  # val_loss | val_acc
+    mode = str(es_cfg.get("mode", "min"))  # min | max
+    maximize = mode.lower() == "max"
+
+    early = EarlyStopping(patience=patience, min_delta=min_delta, maximize=maximize)
+
+    # Initialize best_score consistent with mode
+    if maximize:
+        best_score = -float("inf") if best_score == float("inf") else best_score
+    else:
+        best_score = float("inf") if best_score == -float("inf") else best_score
 
     epochs = int(cfg.get("train", {}).get("epochs", 200))
     metrics_path = workdir / "metrics.jsonl"
@@ -235,85 +223,44 @@ def main() -> None:
     ckpt_best = ckpt_dir / "best.pt"
     ckpt_last = ckpt_dir / "last.pt"
 
-    # One-shot settings (still computed + saved; optional to plot later)
-    os_cfg = cfg.get("one_shot", {})
-    oneshot_enabled = bool(os_cfg.get("enabled", True))
-    n_way = int(os_cfg.get("n_way", 20))
-    val_trials = int(os_cfg.get("val_trials", 320))
-    seed_base = int(os_cfg.get("seed", seed))
-
     logger.info(f"Train pairs: {len(train_pairs)} | Val pairs: {len(val_pairs)} | Test pairs: {len(test_pairs) if test_pairs else 0}")
-    logger.info(f"epochs={epochs} batch_size={cfg.get('train', {}).get('batch_size', '??')} oneshot_enabled={oneshot_enabled}")
+    logger.info(f"epochs={epochs} batch_size={cfg.get('train', {}).get('batch_size', '??')} monitor={monitor} mode={mode} early_stop={es_enabled}")
 
     for epoch in range(start_epoch, epochs + 1):
-        # Paper schedule is epoch-based; we apply before the epoch’s updates.
+        # Paper schedule is epoch-based; apply before the epoch’s updates.
+        sched_info: Dict[str, float] = {}
         if scheduler is not None:
-            scheduler.step(epoch - 1)
+            sched_info = scheduler.step(epoch - 1)
 
         tr_stats = train_one_epoch(model=model, loader=train_loader, device=device, optimizer=optimizer)
-        va_stats, va_probs, va_labels = eval_one_epoch(model=model, loader=val_loader, device=device)
+        va_stats, _, _ = eval_one_epoch(model=model, loader=val_loader, device=device)
 
-        # Less-noisy validation accuracy: best threshold on the full val set
-        res = find_best_threshold(va_probs, va_labels)
+        # Scalar lr/momentum (no lists)
+        lr = float(sched_info.get("lr", optimizer.param_groups[0].get("lr", 0.0)))
+        mom = float(sched_info.get("momentum", optimizer.param_groups[0].get("momentum", 0.0)))
 
-        # Support tuple return or dataclass
-        if isinstance(res, tuple) and len(res) == 2:
-            thr = float(res[0])
-            ver_acc_best = float(res[1])
+        # Select early-stop / best checkpoint score
+        if monitor == "val_acc":
+            score = float(va_stats.acc)
         else:
-            thr = float(getattr(res, "best_thr", getattr(res, "thr_best", getattr(res, "thr", 0.5))))
-            ver_acc_best = float(getattr(res, "best_acc", getattr(res, "acc_best", getattr(res, "acc", 0.0))))
-
-        oneshot_acc = float("nan")
-        oneshot_err = float("nan")
-        if oneshot_enabled:
-            os = evaluate_one_shot(
-                model=model,
-                cfg=cfg,
-                images_root=images_root,
-                device=device,
-                n_way=n_way,
-                n_trials=val_trials,
-                seed=seed_base + epoch,  # different random tasks per epoch
-                ext=ext,
-            )
-            oneshot_acc = float(os.accuracy)
-            oneshot_err = 1.0 - oneshot_acc
-
-        # Log: do NOT print val_acc / val_loss
-        lrs = [float(g["lr"]) for g in optimizer.param_groups]
-        moms = [float(g.get("momentum", 0.0)) for g in optimizer.param_groups]
-        lrs_s = ",".join([f"{x:.6g}" for x in lrs])
-        moms_s = ",".join([f"{x:.3f}" for x in moms])
+            score = float(va_stats.loss)  # default
 
         logger.info(
             f"Epoch {epoch:03d}/{epochs:03d} | "
-            f"train_acc={tr_stats.acc:.4f} train_loss={tr_stats.loss:.6f} | "
-            f"verif_acc_best={ver_acc_best:.4f} thr={thr:.3f} | "
-            f"oneshot_acc={oneshot_acc:.4f} oneshot_err={oneshot_err:.4f} | "
-            f"lrs={lrs_s} | moms={moms_s}"
+            f"train_loss={tr_stats.loss:.6f} train_acc={tr_stats.acc:.4f} | "
+            f"val_loss={va_stats.loss:.6f} val_acc={va_stats.acc:.4f} | "
+            f"lr={lr:.8f} momentum={mom:.3f}"
         )
 
-        # Save metrics for later plotting
+        # Save metrics for plotting
         row = {
             "epoch": int(epoch),
             "train_loss": float(tr_stats.loss),
             "train_acc": float(tr_stats.acc),
-
-            # still saved (even though not printed)
             "val_loss": float(va_stats.loss),
-
-            # less-noisy validation accuracy to plot
-            "verif_acc_best": float(ver_acc_best),
-            "verif_thr": float(thr),
-
-            # optional diagnostics
-            "oneshot_acc": float(oneshot_acc),
-            "oneshot_err": float(oneshot_err),
-
-            # full groups (not just group0)
-            "lrs": [float(x) for x in lrs],
-            "moms": [float(x) for x in moms],
+            "val_acc": float(va_stats.acc),
+            "lr": float(lr),
+            "momentum": float(mom),
         }
         with metrics_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(row) + "\n")
@@ -321,14 +268,14 @@ def main() -> None:
         # Save last
         _save_ckpt(ckpt_last, model, optimizer, epoch, best_score, cfg)
 
-        # Best model selection: maximize verif_acc_best (less noisy than raw val_acc)
-        score = float(ver_acc_best)
-        if score > best_score:
+        # Best model selection
+        improved = (score > best_score) if maximize else (score < best_score)
+        if improved:
             best_score = score
             _save_ckpt(ckpt_best, model, optimizer, epoch, best_score, cfg)
 
         # Early stop
-        if early.update(epoch=epoch, score=score).should_stop:
+        if es_enabled and early.update(epoch=epoch, score=score).should_stop:
             logger.info(f"Early stop at epoch {epoch} (best_score={best_score:.6f})")
             break
 

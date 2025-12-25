@@ -17,26 +17,24 @@ def _deep_setdefault(d: Dict[str, Any], path: str, value: Any) -> None:
 
 
 def _apply_paper_defaults(cfg: Dict[str, Any]) -> Dict[str, Any]:
-    # Paper-critical defaults (architecture already fixed in code)
+    # Paper-critical defaults (architecture fixed in code)
     _deep_setdefault(cfg, "train.epochs", 200)
     _deep_setdefault(cfg, "train.batch_size", 128)
+    _deep_setdefault(cfg, "train.seed", 0)
 
     _deep_setdefault(cfg, "optim.lr_decay", 0.99)
     _deep_setdefault(cfg, "optim.momentum_start", 0.5)
-    _deep_setdefault(cfg, "optim.momentum_final", 0.9)  # if paper specifies different, change here
-    _deep_setdefault(cfg, "optim.weight_decay", 0.0)    # set to paper lambda if specified
+    _deep_setdefault(cfg, "optim.momentum_final", 0.7)  # your config.yaml uses 0.7
+    _deep_setdefault(cfg, "optim.momentum_ramp_epochs", 150)
 
+    # Early stopping (paper uses patience=20; we now monitor val_loss by default)
+    _deep_setdefault(cfg, "early_stop.enabled", True)
     _deep_setdefault(cfg, "early_stop.patience", 20)
-    _deep_setdefault(cfg, "early_stop.monitor", "one_shot_err")
+    _deep_setdefault(cfg, "early_stop.min_delta", 0.0)
+    _deep_setdefault(cfg, "early_stop.monitor", "val_loss")  # val_loss | val_acc
+    _deep_setdefault(cfg, "early_stop.mode", "min")          # min | max
 
-    # one-shot defaults
-    _deep_setdefault(cfg, "one_shot.enabled", True)
-    _deep_setdefault(cfg, "one_shot.n_way", 20)
-    _deep_setdefault(cfg, "one_shot.val_trials", 320)
-    _deep_setdefault(cfg, "one_shot.test_trials", 400)
-    _deep_setdefault(cfg, "one_shot.protocol", "omniglot_paper")  # strict protocol
-
-    # transform defaults (paper ranges)
+    # Transform defaults (paper ranges)
     _deep_setdefault(cfg, "transform.input_size", 105)
     _deep_setdefault(cfg, "transform.component_apply_prob", 0.5)
     _deep_setdefault(cfg, "transform.rotation_deg", [-10.0, 10.0])
@@ -51,16 +49,13 @@ def _apply_paper_defaults(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _assert_strict(cfg: Dict[str, Any]) -> None:
-    # Fail fast if any of the strict constants drift
+    # Keep only invariants that still exist in your simplified pipeline
     assert cfg["train"]["epochs"] == 200
     assert cfg["train"]["batch_size"] == 128
     assert abs(cfg["optim"]["lr_decay"] - 0.99) < 1e-12
     assert abs(cfg["optim"]["momentum_start"] - 0.5) < 1e-12
     assert cfg["early_stop"]["patience"] == 20
-    assert cfg["one_shot"]["n_way"] == 20
-    assert cfg["one_shot"]["val_trials"] == 320
-    assert cfg["one_shot"]["test_trials"] == 400
-    assert cfg["one_shot"]["protocol"] == "omniglot_paper"
+    assert cfg["transform"]["input_size"] == 105
 
 
 def read_model_config(path: str | Path, strict_paper: bool = True) -> Dict[str, Any]:
