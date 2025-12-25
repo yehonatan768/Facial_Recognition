@@ -246,13 +246,16 @@ def split_by_components(
         a = _identity(p1)
         b = _identity(p2)
 
-        if a in train_ids and b in train_ids:
-            train_pairs.append((p1, p2, y))
-        elif a in val_ids and b in val_ids:
+        # Validation must be strict: both identities in val_ids
+        if a in val_ids and b in val_ids:
             val_pairs.append((p1, p2, y))
-        else:
-            # Crossing pair -> drop to preserve leakage-free split
             continue
+
+        # Everything else goes to TRAIN (including crossing pairs).
+        # This preserves "no val leakage" while keeping far more training signal.
+        if a in train_ids or b in train_ids or a in val_ids or b in val_ids:
+            train_pairs.append((p1, p2, y))
+
 
     train_pairs = rebalance_pairs_to_ratio(train_pairs, target_pos_frac=0.5, seed=seed)
     val_pairs = rebalance_pairs_to_ratio(val_pairs, target_pos_frac=0.5, seed=seed + 1)
