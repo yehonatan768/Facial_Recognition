@@ -295,7 +295,6 @@ def main() -> None:
             "train_acc": float(tr_stats.acc),
             "val_loss": float(va_stats.loss),
             "val_acc": float(va_stats.acc),
-            "verif_thr": float(thr),
             "verif_acc_best": float(ver_acc),
             "oneshot_acc": float(oneshot_acc),
             "oneshot_err": float(oneshot_err),
