@@ -1,35 +1,19 @@
-# ============================================================
-# Koch et al. (2015) — PAPER DEFAULTS (PAIR TRAINING ONLY)
-# One-shot / verification evaluation removed per project update.
-# ============================================================
-
-# ----------------------------
-# PATHS (required to run)
-# ----------------------------
 paths:
   images_root: "/content/Face_Recognition/images"
   pairs_train: "/content/Face_Recognition/assets/pairsDevTrain.txt"
   pairs_test:  "/content/Face_Recognition/assets/pairsDevTest.txt"
 
-# ----------------------------
-# TRAINING
-# ----------------------------
 train:
   epochs: 200
   batch_size: 128
   seed: 0
 
-# ----------------------------
-# SPLIT (graph split train->train/val)
-# ----------------------------
 split:
   val_ratio: 0.14
+  target_pos_frac: 0.50
   min_val_identities: 150
   seed: 0
 
-# ----------------------------
-# OPTIMIZATION (paper schedule)
-# ----------------------------
 optim:
   optimizer: sgd
 
@@ -40,29 +24,21 @@ optim:
   momentum_final: 0.7
   momentum_ramp_epochs: 150
 
-  # layer-wise learning rates
   lr_conv: 0.01
   lr_fc: 0.01
   lr_alpha: 0.01
 
-  # layer-wise L2 regularization
   weight_decay_conv: 0.0
   weight_decay_fc: 0.0
   weight_decay_alpha: 0.0
 
-# ----------------------------
-# EARLY STOPPING
-# ----------------------------
 early_stop:
   enabled: true
   patience: 20
   min_delta: 0.0
-  monitor: val_loss   # val_loss | val_acc
-  mode: min           # min | max
+  monitor: val_acc
+  mode: max
 
-# ----------------------------
-# IMAGE TRANSFORMS (paper affine distortion)
-# ----------------------------
 transform:
   input_size: 105
   component_apply_prob: 0.5
@@ -74,23 +50,14 @@ transform:
   translate_x: [-2.0, 2.0]
   translate_y: [-2.0, 2.0]
 
-# ----------------------------
-# MODEL
-# ----------------------------
 model:
   in_channels: 1
   embedding_dim: 4096
 
-# ----------------------------
-# DATA
-# ----------------------------
 data:
   image_ext: ".jpg"
   strict_exists: true
 
-# ----------------------------
-# RUNTIME
-# ----------------------------
 runtime:
   num_workers: 2
   pin_memory: true

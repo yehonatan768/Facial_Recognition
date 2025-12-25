@@ -24,7 +24,6 @@ from src.training.early_stop import EarlyStopping
 
 
 def _project_root() -> Path:
-    # src/run/train.py -> parents[2] == project root
     return Path(__file__).resolve().parents[2]
 
 
@@ -33,7 +32,6 @@ def _default_config_path() -> Path:
 
 
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
-    """Recursive dict merge: override wins."""
     out = dict(base)
     for k, v in (override or {}).items():
         if isinstance(v, dict) and isinstance(out.get(k), dict):
@@ -57,15 +55,11 @@ def _get_device(device_str: str) -> torch.device:
 
 
 def _resolve_paths(cfg: Dict[str, Any], args) -> Dict[str, Path]:
-    """
-    Resolve required paths either from cfg["paths"] or CLI.
-    """
     paths = cfg.get("paths", {})
     images_root = Path(args.images_root or paths.get("images_root", "images"))
     pairs_train = Path(args.pairs_train or paths.get("pairs_train", "assets/pairsDevTrain.txt"))
     pairs_test = Path(args.pairs_test or paths.get("pairs_test", "assets/pairsDevTest.txt"))
 
-    # Interpret relative paths as project-root-relative
     if not images_root.is_absolute():
         images_root = (_project_root() / images_root).resolve()
     if not pairs_train.is_absolute():
@@ -95,6 +89,14 @@ def _save_ckpt(
         },
         path,
     )
+
+
+def _get_monitor_score(monitor: str, val_loss: float, val_acc: float) -> float:
+    if monitor == "val_acc":
+        return float(val_acc)
+    if monitor == "val_loss":
+        return float(val_loss)
+    raise ValueError(f"Unsupported early_stop.monitor={monitor!r}. Use 'val_loss' or 'val_acc'.")
 
 
 def main() -> None:
@@ -157,23 +159,23 @@ def main() -> None:
             f"ext={ext!r} strict_exists={strict_exists}\n"
         )
 
-    # Split train into train/val without identity leakage (graph split)
+    # Split train into train/val WITHOUT DROPPING PAIRS
     split_cfg = cfg.get("split", {})
     split_res = split_by_components(
         pairs=train_pairs_all,
-        val_ratio=float(split_cfg.get("val_ratio", 0.5)),
+        val_ratio=float(split_cfg.get("val_ratio", 0.14)),
+        target_pos_frac=float(split_cfg.get("target_pos_frac", 0.5)),
         min_val_identities=int(split_cfg.get("min_val_identities", 150)),
         seed=int(split_cfg.get("seed", seed)),
+        logger=logger,
     )
     train_pairs = split_res.train_pairs
     val_pairs = split_res.val_pairs
 
-    # DataLoaders
     loaders = build_pair_loaders(cfg=cfg, train_pairs=train_pairs, val_pairs=val_pairs, test_pairs=test_pairs)
     train_loader = loaders.train_loader
     val_loader = loaders.val_loader
 
-    # Model
     model_cfg = cfg.get("model", {})
     model = PaperSiameseModel(
         in_channels=int(model_cfg.get("in_channels", 1)),
@@ -181,17 +183,21 @@ def main() -> None:
         embedding_dim=int(model_cfg.get("embedding_dim", 4096)),
     ).to(device)
 
-    # Paper init (your existing implementation)
     init_weights_like_paper(model)
 
-    # Optim + scheduler
     optim_bundle = build_optimizer_and_scheduler(model=model, cfg=cfg)
     optimizer = optim_bundle.optimizer
     scheduler = optim_bundle.scheduler
 
-    # Resume if provided
     start_epoch = 1
-    best_score = float("inf")  # minimize by default if monitoring val_loss
+    # Best-score init depends on maximize/minimize
+    es_cfg = cfg.get("early_stop", {}) or {}
+    monitor = str(es_cfg.get("monitor", "val_acc"))  # default now: val_acc
+    mode = str(es_cfg.get("mode", "max"))            # default now: max
+    maximize = mode.lower() == "max"
+
+    best_score = -float("inf") if maximize else float("inf")
+
     if args.resume:
         ckpt = torch.load(args.resume, map_location="cpu")
         model.load_state_dict(ckpt["model_state"], strict=True)
@@ -200,22 +206,11 @@ def main() -> None:
         best_score = float(ckpt.get("best_score", best_score))
         logger.info(f"Resumed from {args.resume} (start_epoch={start_epoch}, best_score={best_score:.6f})")
 
-    # Early stopping
-    es_cfg = cfg.get("early_stop", {}) or {}
     es_enabled = bool(es_cfg.get("enabled", True))
     patience = int(es_cfg.get("patience", 20))
     min_delta = float(es_cfg.get("min_delta", 0.0))
-    monitor = str(es_cfg.get("monitor", "val_loss"))  # val_loss | val_acc
-    mode = str(es_cfg.get("mode", "min"))  # min | max
-    maximize = mode.lower() == "max"
 
     early = EarlyStopping(patience=patience, min_delta=min_delta, maximize=maximize)
-
-    # Initialize best_score consistent with mode
-    if maximize:
-        best_score = -float("inf") if best_score == float("inf") else best_score
-    else:
-        best_score = float("inf") if best_score == -float("inf") else best_score
 
     epochs = int(cfg.get("train", {}).get("epochs", 200))
     metrics_path = workdir / "metrics.jsonl"
@@ -223,11 +218,12 @@ def main() -> None:
     ckpt_best = ckpt_dir / "best.pt"
     ckpt_last = ckpt_dir / "last.pt"
 
-    logger.info(f"Train pairs: {len(train_pairs)} | Val pairs: {len(val_pairs)} | Test pairs: {len(test_pairs) if test_pairs else 0}")
+    logger.info(
+        f"Train pairs: {len(train_pairs)} | Val pairs: {len(val_pairs)} | Test pairs: {len(test_pairs) if test_pairs else 0}"
+    )
     logger.info(f"epochs={epochs} batch_size={cfg.get('train', {}).get('batch_size', '??')} monitor={monitor} mode={mode} early_stop={es_enabled}")
 
     for epoch in range(start_epoch, epochs + 1):
-        # Paper schedule is epoch-based; apply before the epoch’s updates.
         sched_info: Dict[str, float] = {}
         if scheduler is not None:
             sched_info = scheduler.step(epoch - 1)
@@ -235,15 +231,10 @@ def main() -> None:
         tr_stats = train_one_epoch(model=model, loader=train_loader, device=device, optimizer=optimizer)
         va_stats, _, _ = eval_one_epoch(model=model, loader=val_loader, device=device)
 
-        # Scalar lr/momentum (no lists)
         lr = float(sched_info.get("lr", optimizer.param_groups[0].get("lr", 0.0)))
         mom = float(sched_info.get("momentum", optimizer.param_groups[0].get("momentum", 0.0)))
 
-        # Select early-stop / best checkpoint score
-        if monitor == "val_acc":
-            score = float(va_stats.acc)
-        else:
-            score = float(va_stats.loss)  # default
+        score = _get_monitor_score(monitor, val_loss=float(va_stats.loss), val_acc=float(va_stats.acc))
 
         logger.info(
             f"Epoch {epoch:03d}/{epochs:03d} | "
@@ -252,7 +243,6 @@ def main() -> None:
             f"lr={lr:.8f} momentum={mom:.3f}"
         )
 
-        # Save metrics for plotting
         row = {
             "epoch": int(epoch),
             "train_loss": float(tr_stats.loss),
@@ -265,16 +255,13 @@ def main() -> None:
         with metrics_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(row) + "\n")
 
-        # Save last
         _save_ckpt(ckpt_last, model, optimizer, epoch, best_score, cfg)
 
-        # Best model selection
         improved = (score > best_score) if maximize else (score < best_score)
         if improved:
             best_score = score
             _save_ckpt(ckpt_best, model, optimizer, epoch, best_score, cfg)
 
-        # Early stop
         if es_enabled and early.update(epoch=epoch, score=score).should_stop:
             logger.info(f"Early stop at epoch {epoch} (best_score={best_score:.6f})")
             break
