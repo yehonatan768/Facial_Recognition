@@ -212,7 +212,7 @@ def main() -> None:
 
     # Resume if provided
     start_epoch = 1
-    best_score = -float("inf")  # we minimize one-shot error
+    best_score = -float("inf")  # maximize verif_acc_best
     if args.resume:
         ckpt = torch.load(args.resume, map_location="cpu")
         model.load_state_dict(ckpt["model_state"], strict=True)
@@ -254,13 +254,13 @@ def main() -> None:
         # Verification best threshold on VAL
         res = find_best_threshold(va_probs, va_labels)
 
-        # Support both legacy tuple return and newer VerificationResult object
+        # Support both legacy tuple return and VerificationResult dataclass.
         if isinstance(res, tuple) and len(res) == 2:
             thr, ver_acc = float(res[0]), float(res[1])
         else:
-            # Try common attribute names
-            thr = float(getattr(res, "thr_best", getattr(res, "thr", getattr(res, "threshold", 0.5))))
-            ver_acc = float(getattr(res, "acc_best", getattr(res, "acc", getattr(res, "accuracy", 0.0))))
+            # Your VerificationResult uses best_thr / best_acc
+            thr = float(getattr(res, "best_thr", getattr(res, "thr", getattr(res, "threshold", 0.5))))
+            ver_acc = float(getattr(res, "best_acc", getattr(res, "acc", getattr(res, "accuracy", 0.0))))
 
         # One-shot validation (paper monitors error)
         oneshot_acc = float("nan")
@@ -312,12 +312,13 @@ def main() -> None:
         # Save last
         _save_ckpt(ckpt_last, model, optimizer, epoch, best_score, cfg)
 
-        # Select best epoch by highest validation accuracy
-        score = float(va_stats.acc)
+        # Select best epoch by highest verification accuracy on VAL (best threshold)
+        score = float(ver_acc)  # verif_acc_best
         improved = score > best_score
         if improved:
             best_score = score
             _save_ckpt(ckpt_best, model, optimizer, epoch, best_score, cfg)
+
 
         # Early stop
         if early.update(epoch=epoch, score=score).should_stop:

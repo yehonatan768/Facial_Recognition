@@ -254,9 +254,8 @@ def split_by_components(
             # Crossing pair -> drop to preserve leakage-free split
             continue
 
-
-    # train_pairs = rebalance_pairs_to_ratio(train_pairs, target_pos_frac=0.5, seed=seed)
-    # val_pairs = rebalance_pairs_to_ratio(val_pairs, target_pos_frac=0.5, seed=seed + 1)
+    train_pairs = rebalance_pairs_to_ratio(train_pairs, target_pos_frac=0.5, seed=seed)
+    val_pairs = rebalance_pairs_to_ratio(val_pairs, target_pos_frac=0.5, seed=seed + 1)
 
     print(f"[Split] train pairs after balance: n={len(train_pairs)} pos_frac={_ratio(train_pairs):.3f}")
     print(f"[Split] val   pairs after balance: n={len(val_pairs)} pos_frac={_ratio(val_pairs):.3f}")
