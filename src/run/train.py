@@ -244,8 +244,9 @@ def main() -> None:
 
     for epoch in range(start_epoch, epochs + 1):
         # Scheduler is epoch-based (paper)
+        sched_info = None
         if scheduler is not None:
-            scheduler.step(epoch - 1)
+            sched_info = scheduler.step(epoch - 1)  # keep your current convention
 
         tr_stats = train_one_epoch(model=model, loader=train_loader, device=device, optimizer=optimizer)
         va_stats, va_probs, va_labels = eval_one_epoch(model=model, loader=val_loader, device=device)
@@ -278,15 +279,19 @@ def main() -> None:
             oneshot_acc = float(os.accuracy)
             oneshot_err = 1.0 - oneshot_acc
 
-        # Log line (your preferred fields)
-        lr0 = float(optimizer.param_groups[0]["lr"])
-        m0 = float(optimizer.param_groups[0].get("momentum", 0.0))
+        # Log learning-rate + momentum (show per-group)
+        lrs = [float(g["lr"]) for g in optimizer.param_groups]
+        moms = [float(g.get("momentum", 0.0)) for g in optimizer.param_groups]
+        # Keep lr0/m0 for backward compatibility in metrics.jsonl
+        lr0 = lrs[0]
+        m0 = moms[0]
         logger.info(
             f"Epoch {epoch:03d}/{epochs:03d} | "
             f"train_acc={tr_stats.acc:.4f} train_loss={tr_stats.loss:.6f} | "
             f"val_acc={va_stats.acc:.4f} val_loss={va_stats.loss:.6f} | "
-            f"thr={thr:.3f} oneshot_acc={oneshot_acc:.4f} oneshot_err={oneshot_err:.4f} | "
-            f"lr0={lr0:.8f} | m0={m0:.3f}"
+            f"oneshot_acc={oneshot_acc:.4f} oneshot_err={oneshot_err:.4f} | "
+            f"lrs={','.join(f'{x:.6g}' for x in lrs)} | "
+            f"moms={','.join(f'{x:.3f}' for x in moms)}"
         )
 
         row = {
