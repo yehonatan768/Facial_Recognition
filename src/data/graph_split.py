@@ -212,8 +212,8 @@ def _choose_val_components_close_to_target(
 
 def split_by_components(
     pairs: List[Pair],
-    val_ratio: float = 0.4,
-    min_val_identities: int = 80,
+    val_ratio: float = 0.3,
+    min_val_identities: int = 40,
     seed: int = 42,
 ) -> GraphSplitResult:
     """
