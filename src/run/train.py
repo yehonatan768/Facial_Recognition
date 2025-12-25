@@ -182,8 +182,8 @@ def main() -> None:
     split_cfg = cfg.get("split", {})
     split_res = split_by_components(
         pairs=train_pairs_all,
-        val_ratio=float(split_cfg.get("val_ratio", 0.2)),
-        min_val_identities=int(split_cfg.get("min_val_identities", 20)),
+        val_ratio=float(split_cfg.get("val_ratio", 0.5)),
+        min_val_identities=int(split_cfg.get("min_val_identities", 150)),
         seed=int(split_cfg.get("seed", seed)),
     )
     train_pairs = split_res.train_pairs
