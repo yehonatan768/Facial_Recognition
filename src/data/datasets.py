@@ -112,40 +112,27 @@ def build_pair_loaders(
     val_pairs: List[Pair],
     test_pairs: Optional[List[Pair]] = None,
 ) -> LoaderBundle:
-    """
-    Builds DataLoaders for train/val (and optionally test) pairs.
-
-    Expected cfg fields (typical):
-      cfg["train"]["batch_size"]
-      cfg["train"]["num_workers"] (optional, default 0)
-      cfg["train"]["pin_memory"] (optional, default True if CUDA)
-      cfg["train"]["drop_last"]  (optional, default True for train)
-    """
     train_t, eval_t = build_transforms(cfg)
 
-    batch_size = int(cfg["train"]["batch_size"])
     num_workers = int(cfg.get("train", {}).get("num_workers", 0))
-    drop_last_train = bool(cfg.get("train", {}).get("drop_last", True))
-
-    # pin_memory default: True if CUDA available, else False
     pin_memory = bool(cfg.get("train", {}).get("pin_memory", torch.cuda.is_available()))
 
     train_ds = PairsPathDataset(train_pairs, transform=train_t, strict_exists=False)
-    val_ds = PairsPathDataset(val_pairs, transform=eval_t, strict_exists=False)
+    val_ds   = PairsPathDataset(val_pairs,   transform=eval_t,  strict_exists=False)
 
+    # FULL-BATCH: one batch per epoch
     train_loader = make_loader(
         train_ds,
-        batch_size=batch_size,
-        shuffle=True,
+        batch_size=len(train_ds),
+        shuffle=False,
         num_workers=num_workers,
         pin_memory=pin_memory,
-        drop_last=drop_last_train,
+        drop_last=False,
     )
 
-    # For validation/test, keep all items; no shuffle
     val_loader = make_loader(
         val_ds,
-        batch_size=batch_size,
+        batch_size=len(val_ds),
         shuffle=False,
         num_workers=num_workers,
         pin_memory=pin_memory,
@@ -157,7 +144,7 @@ def build_pair_loaders(
         test_ds = PairsPathDataset(test_pairs, transform=eval_t, strict_exists=False)
         test_loader = make_loader(
             test_ds,
-            batch_size=batch_size,
+            batch_size=len(test_ds),
             shuffle=False,
             num_workers=num_workers,
             pin_memory=pin_memory,

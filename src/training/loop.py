@@ -34,44 +34,36 @@ def train_one_epoch(
     loss_fn: Optional[nn.Module] = None,
     grad_clip_norm: Optional[float] = None,
 ) -> EpochStats:
-    """
-    One epoch training on verification pairs.
-    Assumes model(x1,x2) returns (p_same, h1, h2) and p_same is sigmoid output.
-    Uses BCELoss by default.
-    """
-    model.train()
-    if loss_fn is None:
-        loss_fn = nn.BCELoss()
+    optimizer.zero_grad(set_to_none=True)
 
     total_loss = 0.0
     total_acc = 0.0
     total_n = 0
 
     for x1, x2, y in loader:
-        x1 = x1.to(device, non_blocking=True)
-        x2 = x2.to(device, non_blocking=True)
-        y = y.to(device, non_blocking=True)  # (B,)
+        x1 = x1.to(device)
+        x2 = x2.to(device)
+        y = y.to(device)
 
-        optimizer.zero_grad(set_to_none=True)
-
-        p_same, _, _ = model(x1, x2)  # (B,1)
-        p_same = p_same.clamp(1e-6, 1.0 - 1e-6)
+        p_same, _, _ = model(x1, x2)
+        p_same = p_same.clamp(1e-6, 1 - 1e-6)
 
         loss = loss_fn(p_same.view(-1), y.view(-1))
-        loss.backward()
+        loss.backward()  # accumulate gradients
 
-        if grad_clip_norm is not None:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), float(grad_clip_norm))
-
-        optimizer.step()
-
-        b = int(y.numel())
-        total_loss += float(loss.item()) * b
+        b = y.numel()
+        total_loss += loss.item() * b
         total_acc += _batch_accuracy(p_same.detach(), y.detach()) * b
         total_n += b
 
-    return EpochStats(loss=total_loss / max(1, total_n), acc=total_acc / max(1, total_n), n=total_n)
+    # ONE update per epoch
+    optimizer.step()
 
+    return EpochStats(
+        loss=total_loss / total_n,
+        acc=total_acc / total_n,
+        n=total_n,
+    )
 
 @torch.no_grad()
 def eval_one_epoch(

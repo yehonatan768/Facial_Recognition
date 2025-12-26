@@ -1,7 +1,11 @@
 paths:
-  images_root: "/content/Face_Recognition/images"
-  pairs_train: "/content/Face_Recognition/assets/pairsDevTrain.txt"
-  pairs_test:  "/content/Face_Recognition/assets/pairsDevTest.txt"
+  images_root: "D:/Projects/Facial_Recognition/images"
+  pairs_train: "D:/Projects/Facial_Recognition/assets/pairsDevTrain.txt"
+  pairs_test:  "D:/Projects/Facial_Recognition/assets/pairsDevTest.txt"
+
+  # images_root: "/content/Face_Recognition/images"
+  # pairs_train: "/content/Face_Recognition/assets/pairsDevTrain.txt"
+  # pairs_test: "/content/Face_Recognition/assets/pairsDevTest.txt"
 
 train:
   epochs: 200
@@ -21,7 +25,7 @@ optim:
   lr_decay_gamma: 0.99
 
   momentum_start: 0.5
-  momentum_final: 0.7
+  momentum_final: 0.9
   momentum_ramp_epochs: 150
 
   lr_conv: 0.01

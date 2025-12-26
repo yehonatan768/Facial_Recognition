@@ -163,7 +163,7 @@ def main() -> None:
     split_cfg = cfg.get("split", {})
     split_res = split_by_components(
         pairs=train_pairs_all,
-        val_ratio=float(split_cfg.get("val_ratio", 0.14)),
+        val_ratio=float(split_cfg.get("val_ratio", 0.25)),
         target_pos_frac=float(split_cfg.get("target_pos_frac", 0.5)),
         min_val_identities=int(split_cfg.get("min_val_identities", 150)),
         seed=int(split_cfg.get("seed", seed)),
@@ -238,8 +238,8 @@ def main() -> None:
 
         logger.info(
             f"Epoch {epoch:03d}/{epochs:03d} | "
-            f"train_loss={tr_stats.loss:.6f} train_acc={tr_stats.acc:.4f} | "
-            f"val_loss={va_stats.loss:.6f} val_acc={va_stats.acc:.4f} | "
+            f"train_loss={tr_stats.loss:.6f} val_loss={va_stats.loss:.6f} | "
+            f"train_acc={tr_stats.acc:.4f} val_acc={va_stats.acc:.4f} | "
             f"lr={lr:.8f} momentum={mom:.3f}"
         )
 
