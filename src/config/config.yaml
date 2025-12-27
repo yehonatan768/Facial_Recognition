@@ -25,8 +25,8 @@ optim:
   lr_decay_gamma: 0.99
 
   momentum_start: 0.5
-  momentum_final: 0.85
-  momentum_ramp_epochs: 40
+  momentum_final: 0.75
+  momentum_ramp_epochs: 20
 
   lr_conv: 0.01
   lr_fc: 0.01
