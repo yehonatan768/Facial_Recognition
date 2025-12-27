@@ -13,7 +13,7 @@ train:
   seed: 0
 
 split:
-  val_ratio: 0.14
+  val_ratio: 0.5
   target_pos_frac: 0.50
   min_val_identities: 150
   seed: 0
@@ -21,12 +21,12 @@ split:
 optim:
   optimizer: sgd
 
-  lr: 0.001
+  lr: 0.01
   lr_decay_gamma: 0.99
 
   momentum_start: 0.5
-  momentum_final: 0.9
-  momentum_ramp_epochs: 150
+  momentum_final: 0.85
+  momentum_ramp_epochs: 40
 
   lr_conv: 0.01
   lr_fc: 0.01
@@ -40,8 +40,8 @@ early_stop:
   enabled: true
   patience: 20
   min_delta: 0.0
-  monitor: val_acc
-  mode: max
+  monitor: val_loss
+  mode: min
 
 transform:
   input_size: 105

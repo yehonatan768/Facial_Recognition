@@ -1,7 +1,9 @@
+# src/run/train.py
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 from pathlib import Path
 from typing import Any, Dict
@@ -19,8 +21,11 @@ from src.data.datasets import build_pair_loaders
 from src.models.siamese import PaperSiameseModel
 from src.models.init import init_weights_like_paper
 from src.training.optim import build_optimizer_and_scheduler
-from src.training.loop import train_one_epoch, eval_one_epoch
+from src.training.loop import train_one_epoch, run_val_and_dump
 from src.training.early_stop import EarlyStopping
+
+# Helps fragmentation in some CUDA environments (safe to keep)
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 
 def _project_root() -> Path:
@@ -47,6 +52,9 @@ def _seed_everything(seed: int) -> None:
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+
 
 def _get_device(device_str: str) -> torch.device:
     if device_str == "auto":
@@ -55,7 +63,7 @@ def _get_device(device_str: str) -> torch.device:
 
 
 def _resolve_paths(cfg: Dict[str, Any], args) -> Dict[str, Path]:
-    paths = cfg.get("paths", {})
+    paths = cfg.get("paths", {}) or {}
     images_root = Path(args.images_root or paths.get("images_root", "images"))
     pairs_train = Path(args.pairs_train or paths.get("pairs_train", "assets/pairsDevTrain.txt"))
     pairs_test = Path(args.pairs_test or paths.get("pairs_test", "assets/pairsDevTest.txt"))
@@ -102,7 +110,7 @@ def _get_monitor_score(monitor: str, val_loss: float, val_acc: float) -> float:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", type=str, default="", help="Optional. If omitted, uses src/config/config.yaml")
-    ap.add_argument("--defaults", type=str, default="", help="Optional defaults YAML (paper defaults).")
+    ap.add_argument("--defaults", type=str, default="", help="Optional defaults YAML to merge under config.yaml")
     ap.add_argument("--workdir", type=str, default="outputs", help="Where to write checkpoints/logs.")
     ap.add_argument("--device", type=str, default="auto", help="auto|cpu|cuda|cuda:0")
     ap.add_argument("--resume", type=str, default="", help="Optional checkpoint to resume.")
@@ -129,6 +137,12 @@ def main() -> None:
 
     seed = int(cfg.get("train", {}).get("seed", 0))
     _seed_everything(seed)
+
+    # Reset metrics file on fresh run
+    metrics_path = workdir / "metrics.jsonl"
+    if not args.resume and metrics_path.exists():
+        metrics_path.unlink()
+        logger.info(f"Cleared previous metrics file: {metrics_path}")
 
     paths = _resolve_paths(cfg, args)
     images_root = paths["images_root"]
@@ -159,8 +173,7 @@ def main() -> None:
             f"ext={ext!r} strict_exists={strict_exists}\n"
         )
 
-    # Split train into train/val WITHOUT DROPPING PAIRS
-    split_cfg = cfg.get("split", {})
+    split_cfg = cfg.get("split", {}) or {}
     split_res = split_by_components(
         pairs=train_pairs_all,
         val_ratio=float(split_cfg.get("val_ratio", 0.25)),
@@ -176,7 +189,7 @@ def main() -> None:
     train_loader = loaders.train_loader
     val_loader = loaders.val_loader
 
-    model_cfg = cfg.get("model", {})
+    model_cfg = cfg.get("model", {}) or {}
     model = PaperSiameseModel(
         in_channels=int(model_cfg.get("in_channels", 1)),
         enforce_105=bool(model_cfg.get("enforce_105", True)),
@@ -190,12 +203,11 @@ def main() -> None:
     scheduler = optim_bundle.scheduler
 
     start_epoch = 1
-    # Best-score init depends on maximize/minimize
-    es_cfg = cfg.get("early_stop", {}) or {}
-    monitor = str(es_cfg.get("monitor", "val_acc"))  # default now: val_acc
-    mode = str(es_cfg.get("mode", "max"))            # default now: max
-    maximize = mode.lower() == "max"
 
+    es_cfg = cfg.get("early_stop", {}) or {}
+    monitor = str(es_cfg.get("monitor", "val_acc"))
+    mode = str(es_cfg.get("mode", "max"))
+    maximize = mode.lower() == "max"
     best_score = -float("inf") if maximize else float("inf")
 
     if args.resume:
@@ -209,19 +221,24 @@ def main() -> None:
     es_enabled = bool(es_cfg.get("enabled", True))
     patience = int(es_cfg.get("patience", 20))
     min_delta = float(es_cfg.get("min_delta", 0.0))
-
     early = EarlyStopping(patience=patience, min_delta=min_delta, maximize=maximize)
 
     epochs = int(cfg.get("train", {}).get("epochs", 200))
-    metrics_path = workdir / "metrics.jsonl"
+
+    # control dump frequency (default: every 5 epochs)
+    dump_every = int(cfg.get("train", {}).get("dump_every", 5))
+
     ckpt_dir = workdir / "checkpoints"
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
     ckpt_best = ckpt_dir / "best.pt"
     ckpt_last = ckpt_dir / "last.pt"
 
     logger.info(
         f"Train pairs: {len(train_pairs)} | Val pairs: {len(val_pairs)} | Test pairs: {len(test_pairs) if test_pairs else 0}"
     )
-    logger.info(f"epochs={epochs} batch_size={cfg.get('train', {}).get('batch_size', '??')} monitor={monitor} mode={mode} early_stop={es_enabled}")
+    logger.info(
+        f"epochs={epochs} batch_size={cfg.get('train', {}).get('batch_size', '??')} monitor={monitor} mode={mode} early_stop={es_enabled}"
+    )
 
     for epoch in range(start_epoch, epochs + 1):
         sched_info: Dict[str, float] = {}
@@ -229,7 +246,17 @@ def main() -> None:
             sched_info = scheduler.step(epoch - 1)
 
         tr_stats = train_one_epoch(model=model, loader=train_loader, device=device, optimizer=optimizer)
-        va_stats, _, _ = eval_one_epoch(model=model, loader=val_loader, device=device)
+
+        do_dump = (epoch == start_epoch) or (dump_every > 0 and (epoch % dump_every == 0))
+
+        va_stats, dump_path = run_val_and_dump(
+            model=model,
+            loader=val_loader,
+            device=device,
+            epoch=epoch,
+            workdir=workdir,
+            dump=do_dump,
+        )
 
         lr = float(sched_info.get("lr", optimizer.param_groups[0].get("lr", 0.0)))
         mom = float(sched_info.get("momentum", optimizer.param_groups[0].get("momentum", 0.0)))
@@ -241,6 +268,7 @@ def main() -> None:
             f"train_loss={tr_stats.loss:.6f} val_loss={va_stats.loss:.6f} | "
             f"train_acc={tr_stats.acc:.4f} val_acc={va_stats.acc:.4f} | "
             f"lr={lr:.8f} momentum={mom:.3f}"
+            + (f" | val_dump={dump_path}" if dump_path is not None else "")
         )
 
         row = {

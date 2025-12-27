@@ -84,33 +84,73 @@ class PaperLrMomentumScheduler:
 
 
 def build_optimizer_and_scheduler(model: torch.nn.Module, cfg: Dict[str, Any]) -> OptimBundle:
+    """
+    Stable SGD schedule for Siamese verification.
+
+    Goals:
+      - Keep SGD+momentum (good generalization for metric/verification learning)
+      - Avoid spikes from an aggressive momentum ramp
+      - Provide predictable, monotone effective step size
+
+    Behavior:
+      - LR decays exponentially: lr(epoch) = base_lr * (lr_decay ** epoch)
+      - Momentum is either:
+          A) fixed (recommended), or
+          B) gently warmed up from momentum_start -> momentum_final over a SHORT warmup,
+             then held constant.
+
+    Config keys (all optional):
+      cfg["optim"]["lr"] (float) default 1e-2
+      cfg["optim"]["lr_decay"] (float) default 0.99
+      cfg["optim"]["momentum"] (float) if provided -> fixed momentum (preferred)
+      cfg["optim"]["momentum_start"] (float) default 0.5
+      cfg["optim"]["momentum_final"] (float) default 0.85
+      cfg["optim"]["momentum_warmup_epochs"] (int) default 10
+      cfg["optim"]["weight_decay"] (float) default 0.0
+
+      Layer-wise overrides (optional):
+        lr_conv, lr_fc, lr_alpha
+        weight_decay_conv, weight_decay_fc, weight_decay_alpha
+        momentum_final_conv, momentum_final_fc, momentum_final_alpha
+
+    NOTE:
+      - If you set cfg["optim"]["momentum"], warmup is disabled and momentum is constant.
+      - Defaults choose momentum_final=0.85 (more stable than 0.90 for your full-batch regime).
+    """
     optim_cfg = cfg.get("optim", {}) or {}
-    train_cfg = cfg.get("train", {}) or {}
 
-    # ---- Paper-ish defaults (strict-ish) ----
-    # Backward-compatible: accept lr_decay OR lr_decay_gamma
+    # ---- Stable defaults ----
     lr_decay = float(optim_cfg.get("lr_decay", optim_cfg.get("lr_decay_gamma", 0.99)))
-    momentum_start = float(optim_cfg.get("momentum_start", 0.5))
-    max_epochs = int(train_cfg.get("epochs", 200))
-    momentum_ramp_epochs = int(optim_cfg.get("momentum_ramp_epochs", max_epochs))
-
-    # Layer-wise hyperparams (allow override; default to single lr)
     base_lr = float(optim_cfg.get("lr", 1e-2))
+
+    # Prefer FIXED momentum if user provides it
+    fixed_momentum: Optional[float] = optim_cfg.get("momentum", None)
+    if fixed_momentum is not None:
+        fixed_momentum = float(fixed_momentum)
+
+    # If not fixed, do a short warmup and then hold constant
+    momentum_start = float(optim_cfg.get("momentum_start", 0.5))
+    base_mu_final = float(optim_cfg.get("momentum_final", 0.85))  # <- stable default
+    warmup_epochs = int(optim_cfg.get("momentum_warmup_epochs", 10))
+    warmup_epochs = max(1, warmup_epochs)
+
+    base_wd = float(optim_cfg.get("weight_decay", 0.0))
+
+    # Layer-wise overrides (still supported)
     lr_conv = float(optim_cfg.get("lr_conv", base_lr))
     lr_fc = float(optim_cfg.get("lr_fc", base_lr))
     lr_alpha = float(optim_cfg.get("lr_alpha", base_lr))
 
-    base_wd = float(optim_cfg.get("weight_decay", 0.0))
     wd_conv = float(optim_cfg.get("weight_decay_conv", base_wd))
     wd_fc = float(optim_cfg.get("weight_decay_fc", base_wd))
     wd_alpha = float(optim_cfg.get("weight_decay_alpha", base_wd))
 
-    base_mu_final = float(optim_cfg.get("momentum_final", 0.9))
+    # Per-group momentum finals (only used if not fixed momentum)
     mu_conv = float(optim_cfg.get("momentum_final_conv", base_mu_final))
     mu_fc = float(optim_cfg.get("momentum_final_fc", base_mu_final))
     mu_alpha = float(optim_cfg.get("momentum_final_alpha", base_mu_final))
 
-    # ---- Collect params by name (PaperSiameseModel: encoder.*, head.alpha.*) ----
+    # ---- Collect params by name ----
     conv_params, fc_params, alpha_params = [], [], []
     for name, p in model.named_parameters():
         if not p.requires_grad:
@@ -122,49 +162,63 @@ def build_optimizer_and_scheduler(model: torch.nn.Module, cfg: Dict[str, Any]) -
         elif name.startswith("head.alpha"):
             alpha_params.append(p)
         else:
-            # fall back: treat as FC-like
             fc_params.append(p)
+
+    # ---- Build param groups ----
+    def _init_momentum_for_group(mu_final: float) -> float:
+        if fixed_momentum is not None:
+            return float(fixed_momentum)
+        # start lower for warmup
+        return float(momentum_start)
 
     param_groups = [
         {
             "params": conv_params,
             "lr": lr_conv,
-            "momentum": momentum_start,
+            "momentum": _init_momentum_for_group(mu_conv),
             "weight_decay": wd_conv,
             "momentum_final": mu_conv,
         },
         {
             "params": fc_params,
             "lr": lr_fc,
-            "momentum": momentum_start,
+            "momentum": _init_momentum_for_group(mu_fc),
             "weight_decay": wd_fc,
             "momentum_final": mu_fc,
         },
         {
             "params": alpha_params,
             "lr": lr_alpha,
-            "momentum": momentum_start,
+            "momentum": _init_momentum_for_group(mu_alpha),
             "weight_decay": wd_alpha,
             "momentum_final": mu_alpha,
         },
     ]
-
-    # Remove empty groups to avoid optimizer errors
     param_groups = [g for g in param_groups if len(g["params"]) > 0]
 
-    # IMPORTANT: keep "momentum_final" in param groups (used to build per-group finals list)
     optimizer = torch.optim.SGD(param_groups)
 
-    # FIX: scheduler must use per-group finals, not a single global value
-    momentum_finals = [
-        float(g.get("momentum_final", base_mu_final)) for g in optimizer.param_groups
-    ]
+    # ---- Stable scheduler ----
+    if fixed_momentum is not None:
+        # Momentum constant: no ramp at all
+        scheduler = PaperLrMomentumScheduler(
+            optimizer=optimizer,
+            lr_decay=lr_decay,
+            momentum_start=float(fixed_momentum),
+            momentum_final=[float(fixed_momentum) for _ in optimizer.param_groups],
+            momentum_ramp_epochs=1,  # effectively constant
+        )
+        return OptimBundle(optimizer=optimizer, scheduler=scheduler)
+
+    # Short warmup then hold: implemented by setting ramp_epochs=warmup_epochs
+    momentum_finals = [float(g.get("momentum_final", base_mu_final)) for g in optimizer.param_groups]
 
     scheduler = PaperLrMomentumScheduler(
         optimizer=optimizer,
         lr_decay=lr_decay,
         momentum_start=momentum_start,
-        momentum_final=momentum_finals,  # <-- per-group finals
-        momentum_ramp_epochs=momentum_ramp_epochs,
+        momentum_final=momentum_finals,
+        momentum_ramp_epochs=warmup_epochs,  # <-- short warmup, then t clamps at 1.0
     )
     return OptimBundle(optimizer=optimizer, scheduler=scheduler)
+

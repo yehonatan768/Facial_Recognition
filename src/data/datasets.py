@@ -67,7 +67,13 @@ class PairsPathDataset(Dataset):
         # BCE-friendly label type
         y_t = torch.tensor(float(y), dtype=torch.float32)
 
-        return x1, x2, y_t
+        return {
+            "x1": x1,
+            "x2": x2,
+            "y": y_t,
+            "path1": str(p1),
+            "path2": str(p2),
+        }
 
 
 def build_transforms(cfg: Dict[str, Any]) -> Tuple[PaperImageTransform, PaperImageTransform]:
@@ -123,8 +129,8 @@ def build_pair_loaders(
     # FULL-BATCH: one batch per epoch
     train_loader = make_loader(
         train_ds,
-        batch_size=len(train_ds),
-        shuffle=False,
+        batch_size=int(cfg["train"]["batch_size"]),  # e.g. 128
+        shuffle=False,  # deterministic
         num_workers=num_workers,
         pin_memory=pin_memory,
         drop_last=False,
@@ -132,7 +138,7 @@ def build_pair_loaders(
 
     val_loader = make_loader(
         val_ds,
-        batch_size=len(val_ds),
+        batch_size=int(cfg["train"]["batch_size"]),  # or separate val_batch_size
         shuffle=False,
         num_workers=num_workers,
         pin_memory=pin_memory,

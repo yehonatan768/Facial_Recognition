@@ -32,37 +32,42 @@ def load_metrics_jsonl(path: Path) -> Dict[str, List[float]]:
 
 
 def plot_train_val_curves(metrics_jsonl: Path) -> None:
-    """
-    Plots:
-      - train_loss vs val_loss
-      - train_acc  vs val_acc
-    """
-    import matplotlib.pyplot as plt  # local import
+    import matplotlib.pyplot as plt
 
     cols = load_metrics_jsonl(metrics_jsonl)
-
     epoch = cols.get("epoch")
-    if epoch is None:
-        raise ValueError("metrics.jsonl missing 'epoch' column")
+    if epoch is None or len(epoch) == 0:
+        raise ValueError("metrics.jsonl missing 'epoch' column or empty")
 
-    # Loss plot
-    if "train_loss" in cols and "val_loss" in cols:
+    # --- FIX: keep only the last run if metrics.jsonl contains multiple runs ---
+    # Find the last index where epoch resets (epoch decreases).
+    start = 0
+    for i in range(1, len(epoch)):
+        if epoch[i] < epoch[i - 1]:
+            start = i
+
+    def _slice(k: str):
+        return cols[k][start:] if k in cols else None
+
+    e = epoch[start:]
+
+    if _slice("train_loss") is not None and _slice("val_loss") is not None:
         plt.figure()
-        plt.plot(epoch, cols["train_loss"], label="train_loss")
-        plt.plot(epoch, cols["val_loss"], label="val_loss")
+        plt.plot(e, _slice("train_loss"), label="train_loss")
+        plt.plot(e, _slice("val_loss"), label="val_loss")
         plt.xlabel("epoch")
         plt.ylabel("loss")
         plt.legend()
-        plt.title("Loss vs Epoch")
+        plt.title("Train vs Val Loss")
         plt.show()
 
-    # Accuracy plot
-    if "train_acc" in cols and "val_acc" in cols:
+    if _slice("train_acc") is not None and _slice("val_acc") is not None:
         plt.figure()
-        plt.plot(epoch, cols["train_acc"], label="train_acc")
-        plt.plot(epoch, cols["val_acc"], label="val_acc")
+        plt.plot(e, _slice("train_acc"), label="train_acc")
+        plt.plot(e, _slice("val_acc"), label="val_acc")
         plt.xlabel("epoch")
         plt.ylabel("accuracy")
         plt.legend()
-        plt.title("Accuracy vs Epoch")
+        plt.title("Train vs Val Accuracy")
         plt.show()
+
