@@ -47,19 +47,9 @@ transform:
   std: 0.5
 
 data:
-  face_focus:
-    enabled: true
-    size: 105            # must match model input size
-    pre_crop_ratio: 0.90
-    center: [0.0, 0.0]
-    axes: [0.75, 0.90]
-    edge_softness: 0.08
-    mask_power: 2.0
-    randomize_background: false
-    background_noise_std: 0.08
-    jitter_center: 0.03
-    jitter_axes: 0.05
-    background_fill: 0.5
+  image_ext: ".jpg"
+  strict_exists: true
+
 
 model:
   in_channels: 1
