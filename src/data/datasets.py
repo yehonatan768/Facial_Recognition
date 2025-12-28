@@ -81,8 +81,8 @@ def build_transforms(cfg: Dict[str, Any]) -> Tuple[build_transform_from_config, 
     Returns (train_transform, eval_transform)
     using your PaperImageTransform.from_config().
     """
-    train_t = build_transform_from_config.from_config(cfg, train=True)
-    eval_t = build_transform_from_config.from_config(cfg, train=False)
+    train_t = build_transform_from_config(cfg, train=True)
+    eval_t = build_transform_from_config(cfg, train=False)
     return train_t, eval_t
 
 
