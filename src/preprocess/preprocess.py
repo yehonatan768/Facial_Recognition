@@ -13,32 +13,32 @@ from torchvision.transforms import functional as TF
 @dataclass
 class FaceFocusConfig:
     # Target size for the network
-    size: int = 250
+    size: int
 
     # Pre-crop: crop around center before resizing to 'size'
     # 1.0 = crop to the shorter side (square crop)
     # <1.0 = tighter crop (zooms in). Recommended: 0.85 - 0.95
-    pre_crop_ratio: float = 0.90
+    pre_crop_ratio: float
 
     # Ellipse mask parameters (in normalized coordinates [-1..1])
-    center: Tuple[float, float] = (0.0, 0.0)      # (cx, cy)
-    axes: Tuple[float, float] = (0.75, 0.90)      # (ax, ay)
-    edge_softness: float = 0.08                   # bigger = softer edge
+    center: Tuple[float, float]      # (cx, cy)
+    axes: Tuple[float, float]     # (ax, ay)
+    edge_softness: float                   # bigger = softer edge
 
     # Mask shaping: >1 makes the outside fall off faster (less background leakage)
     # Recommended: 1.5 - 3.0. Try 2.0.
-    mask_power: float = 2.0
+    mask_power: float
 
     # If True, add noise outside mask instead of constant
-    randomize_background: bool = True
-    background_noise_std: float = 0.08            # noise in [0,1] scale
+    randomize_background: bool
+    background_noise_std: float          # noise in [0,1] scale
 
     # Small random jitter of ellipse per image (train only)
-    jitter_center: float = 0.03                   # +/- jitter in normalized coords
-    jitter_axes: float = 0.05                     # +/- relative jitter on axes
+    jitter_center: float                # +/- jitter in normalized coords
+    jitter_axes: float                    # +/- relative jitter on axes
 
     # What value to use outside mask (if not randomizing)
-    background_fill: float = 0.5                  # mid-gray
+    background_fill: float                 # mid-gray
 
 
 class CenterCropMinSide(torch.nn.Module):

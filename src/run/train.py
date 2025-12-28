@@ -28,6 +28,22 @@ from src.training.early_stop import EarlyStopping
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 
+def _require(cfg: Dict[str, Any], path: str) -> Any:
+    cur: Any = cfg
+    for k in path.split("."):
+        if not isinstance(cur, dict) or k not in cur:
+            raise KeyError(f"Missing required config key: {path}")
+        cur = cur[k]
+    return cur
+
+
+def _require_str(cfg: Dict[str, Any], path: str) -> str:
+    v = _require(cfg, path)
+    if not isinstance(v, str) or not v:
+        raise TypeError(f"Config key {path} must be a non-empty string, got {v!r}")
+    return v
+
+
 def _project_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
@@ -63,10 +79,15 @@ def _get_device(device_str: str) -> torch.device:
 
 
 def _resolve_paths(cfg: Dict[str, Any], args) -> Dict[str, Path]:
-    paths = cfg.get("paths", {}) or {}
-    images_root = Path(args.images_root or paths.get("images_root", "images"))
-    pairs_train = Path(args.pairs_train or paths.get("pairs_train", "assets/pairsDevTrain.txt"))
-    pairs_test = Path(args.pairs_test or paths.get("pairs_test", "assets/pairsDevTest.txt"))
+    # Optional CLI overrides can stay if you want, but no implicit defaults.
+    # If you want *only* config.yaml and no overrides at all, remove args usage here.
+    images_root_s = args.images_root or _require_str(cfg, "paths.images_root")
+    pairs_train_s = args.pairs_train or _require_str(cfg, "paths.pairs_train")
+    pairs_test_s = args.pairs_test or _require_str(cfg, "paths.pairs_test")
+
+    images_root = Path(images_root_s)
+    pairs_train = Path(pairs_train_s)
+    pairs_test = Path(pairs_test_s)
 
     if not images_root.is_absolute():
         images_root = (_project_root() / images_root).resolve()
@@ -135,7 +156,7 @@ def main() -> None:
     device = _get_device(args.device)
     logger.info(f"Device: {device}")
 
-    seed = int(cfg.get("train", {}).get("seed", 0))
+    seed = int(_require(cfg, "train.seed"))
     _seed_everything(seed)
 
     # Reset metrics file on fresh run
@@ -149,8 +170,8 @@ def main() -> None:
     pairs_train_path = paths["pairs_train"]
     pairs_test_path = paths["pairs_test"]
 
-    ext = str(cfg.get("data", {}).get("image_ext", cfg.get("data", {}).get("ext", ".jpg")))
-    strict_exists = bool(cfg.get("data", {}).get("strict_exists", True))
+    ext = str(_require(cfg, "data.image_ext"))
+    strict_exists = bool(_require(cfg, "data.strict_exists"))
 
     loaded = load_train_test_pairs(
         train_pairs_path=pairs_train_path,
@@ -173,15 +194,15 @@ def main() -> None:
             f"ext={ext!r} strict_exists={strict_exists}\n"
         )
 
-    split_cfg = cfg.get("split", {}) or {}
     split_res = split_by_components(
         pairs=train_pairs_all,
-        val_ratio=float(split_cfg.get("val_ratio", 0.25)),
-        target_pos_frac=float(split_cfg.get("target_pos_frac", 0.5)),
-        min_val_identities=int(split_cfg.get("min_val_identities", 150)),
-        seed=int(split_cfg.get("seed", seed)),
+        val_ratio=float(_require(cfg, "split.val_ratio")),
+        target_pos_frac=float(_require(cfg, "split.target_pos_frac")),
+        min_val_identities=int(_require(cfg, "split.min_val_identities")),
+        seed=int(_require(cfg, "split.seed")),
         logger=logger,
     )
+
     train_pairs = split_res.train_pairs
     val_pairs = split_res.val_pairs
 
@@ -223,10 +244,8 @@ def main() -> None:
     min_delta = float(es_cfg.get("min_delta", 0.0))
     early = EarlyStopping(patience=patience, min_delta=min_delta, maximize=maximize)
 
-    epochs = int(cfg.get("train", {}).get("epochs", 200))
-
-    # control dump frequency (default: every 5 epochs)
-    dump_every = int(cfg.get("train", {}).get("dump_every", 5))
+    epochs = int(_require(cfg, "train.epochs"))
+    dump_every = int(_require(cfg, "train.dump_every"))
 
     ckpt_dir = workdir / "checkpoints"
     ckpt_dir.mkdir(parents=True, exist_ok=True)

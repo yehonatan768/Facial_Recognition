@@ -138,13 +138,9 @@ def read_model_config(path: str | Path, write_back_paths: bool = True) -> Dict[s
     if not isinstance(cfg, dict):
         raise ValueError("Config YAML must parse to a dict at the top level.")
 
-    cfg = _apply_paper_defaults(cfg)
 
     project_root = _find_project_root(p.parent)
-    cfg, updated = _coerce_default_paths(cfg, project_root)
-
-    if write_back_paths and updated:
-        _write_yaml(p, cfg)
+    update = False
 
     # Helpful to keep around (not required, but useful for debugging/logging)
     cfg.setdefault("paths", {})
