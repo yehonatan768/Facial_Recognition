@@ -10,7 +10,7 @@ train:
   seed: 0
 
 split:
-  val_ratio: 0.5
+  val_ratio: 0.2
   target_pos_frac: 0.50
   min_val_identities: 150
   seed: 0
@@ -22,7 +22,7 @@ optim:
   lr_decay_gamma: 0.99
 
   momentum_start: 0.5
-  momentum_final: 0.75
+  momentum_final: 0.9
   momentum_ramp_epochs: 20
 
   lr_conv: 0.01
