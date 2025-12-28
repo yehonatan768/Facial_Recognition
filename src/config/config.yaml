@@ -1,7 +1,7 @@
 paths:
   images_root: "images"
-  pairs_train: "assets\pairsDevTrain.txt"
-  pairs_test:  "assets\pairsDevTest.txt"
+  pairs_train: "assets/pairsDevTrain.txt"
+  pairs_test:  "assets/pairsDevTest.txt"
 
 
 train:
