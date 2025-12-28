@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 import yaml
 
@@ -45,17 +45,88 @@ def _apply_paper_defaults(cfg: Dict[str, Any]) -> Dict[str, Any]:
     # ---- transforms ----
     _deep_setdefault(cfg, "transform.input_size", 105)
 
+    # ---- runtime defaults (mirror what your loaders expect) ----
+    _deep_setdefault(cfg, "runtime.num_workers", 0)
+    _deep_setdefault(cfg, "runtime.pin_memory", True)
+
     return cfg
 
 
-def read_model_config(path: str | Path) -> Dict[str, Any]:
+def _find_project_root(start: Path) -> Path:
     """
-    Load YAML config with paper-like defaults but NO hard constraints.
+    Heuristic: walk upwards and pick the first directory that looks like the repo root.
+    """
+    start = start.resolve()
+    candidates = [start, *start.parents]
 
-    This allows:
-      - optimizer tuning
-      - schedule experimentation
-      - stable iteration without AssertionErrors
+    for p in candidates:
+        has_src = (p / "src").is_dir()
+        has_assets = (p / "assets").is_dir()
+        has_images = (p / "images").is_dir()
+        has_git = (p / ".git").exists()
+
+        # Strong signals: src + (assets or images) or .git
+        if has_src and ((has_assets and has_images) or has_git):
+            return p
+
+        # Accept src-only as fallback (still better than CWD)
+        if has_src:
+            return p
+
+    # Last resort
+    return start
+
+
+def _coerce_default_paths(cfg: Dict[str, Any], project_root: Path) -> Tuple[Dict[str, Any], bool]:
+    """
+    Ensures cfg['paths'] contains portable (relative) paths.
+    If updated, returns (cfg, True).
+    """
+    updated = False
+    paths = cfg.get("paths")
+    if not isinstance(paths, dict):
+        cfg["paths"] = {}
+        paths = cfg["paths"]
+        updated = True
+
+    # Defaults (relative to project root)
+    defaults = {
+        "images_root": "images",
+        "pairs_train": "assets/pairsDevTrain.txt",
+        "pairs_test": "assets/pairsDevTest.txt",
+    }
+
+    # If user supplied bare filenames (like pairsDevTrain.txt), auto-fix to assets/...
+    # This matches your loader expectations and is what you want for portability.
+    for key, default_rel in defaults.items():
+        cur = paths.get(key)
+
+        if not cur:
+            paths[key] = default_rel
+            updated = True
+            continue
+
+        # Normalize common mistake: "pairsDevTrain.txt" should be "assets/pairsDevTrain.txt"
+        cur_p = Path(str(cur))
+        if not cur_p.is_absolute() and cur_p.parent == Path(".") and key in ("pairs_train", "pairs_test"):
+            candidate = project_root / "assets" / cur_p.name
+            if candidate.exists():
+                paths[key] = f"assets/{cur_p.name}"
+                updated = True
+
+    return cfg, updated
+
+
+def _write_yaml(path: Path, cfg: Dict[str, Any]) -> None:
+    # Write stable, human-readable YAML
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def read_model_config(path: str | Path, write_back_paths: bool = True) -> Dict[str, Any]:
+    """
+    Load YAML config with safe defaults, and ensure portable paths exist.
     """
     p = Path(path)
     if not p.exists():
@@ -68,4 +139,15 @@ def read_model_config(path: str | Path) -> Dict[str, Any]:
         raise ValueError("Config YAML must parse to a dict at the top level.")
 
     cfg = _apply_paper_defaults(cfg)
+
+    project_root = _find_project_root(p.parent)
+    cfg, updated = _coerce_default_paths(cfg, project_root)
+
+    if write_back_paths and updated:
+        _write_yaml(p, cfg)
+
+    # Helpful to keep around (not required, but useful for debugging/logging)
+    cfg.setdefault("paths", {})
+    cfg["paths"].setdefault("project_root", str(project_root))
+
     return cfg

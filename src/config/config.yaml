@@ -1,11 +1,8 @@
 paths:
-  images_root: "D:/Projects/Facial_Recognition/images"
-  pairs_train: "D:/Projects/Facial_Recognition/assets/pairsDevTrain.txt"
-  pairs_test:  "D:/Projects/Facial_Recognition/assets/pairsDevTest.txt"
+  images_root: "images"
+  pairs_train: "pairsDevTrain.txt"
+  pairs_test:  "pairsDevTest.txt"
 
-  # images_root: "/content/Face_Recognition/images"
-  # pairs_train: "/content/Face_Recognition/assets/pairsDevTrain.txt"
-  # pairs_test: "/content/Face_Recognition/assets/pairsDevTest.txt"
 
 train:
   epochs: 200

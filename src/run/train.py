@@ -33,7 +33,7 @@ def _project_root() -> Path:
 
 
 def _default_config_path() -> Path:
-    return Path("src/config/config.yaml")
+    return (_project_root() / "src" / "config" / "config.yaml").resolve()
 
 
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
@@ -111,7 +111,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", type=str, default="", help="Optional. If omitted, uses src/config/config.yaml")
     ap.add_argument("--defaults", type=str, default="", help="Optional defaults YAML to merge under config.yaml")
-    ap.add_argument("--workdir", type=str, default="outputs", help="Where to write checkpoints/logs.")
+    ap.add_argument("--workdir", type=str, default=str(_project_root() / "outputs"), help="Where to write checkpoints/logs.")
     ap.add_argument("--device", type=str, default="auto", help="auto|cpu|cuda|cuda:0")
     ap.add_argument("--resume", type=str, default="", help="Optional checkpoint to resume.")
     ap.add_argument("--images-root", type=str, default="", help="Override cfg.paths.images_root")
