@@ -5,8 +5,8 @@ from typing import Any, Dict
 
 from torchvision import transforms
 
-from src.preprocess import FaceFocusConfig, build_focus_face_transform
-from src.paper_transforms import PaperImageTransform  # your existing class
+from src.preprocess.preprocess import FaceFocusConfig, build_focus_face_transform
+from src.preprocess.paper_transforms import PaperImageTransform  # your existing class
 
 
 def _get(cfg: Dict[str, Any], path: str, default: Any) -> Any:
