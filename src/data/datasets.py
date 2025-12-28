@@ -9,7 +9,7 @@ from torch.utils.data import Dataset, DataLoader
 from PIL import Image
 
 from src.data.load_data import load_image_rgb  # loads PIL RGB; transform converts to grayscale
-from src.data.paper_transforms import PaperImageTransform
+from src.preprocess.transforms import build_transform_from_config
 
 
 # Your standard pair type across the project: (img1_path, img2_path, label)
@@ -31,7 +31,7 @@ class PairsPathDataset(Dataset):
     def __init__(
         self,
         pairs: List[Pair],
-        transform: PaperImageTransform,
+        transform: build_transform_from_config,
         strict_exists: bool = False,
     ):
         self.pairs = pairs
@@ -76,13 +76,13 @@ class PairsPathDataset(Dataset):
         }
 
 
-def build_transforms(cfg: Dict[str, Any]) -> Tuple[PaperImageTransform, PaperImageTransform]:
+def build_transforms(cfg: Dict[str, Any]) -> Tuple[build_transform_from_config, build_transform_from_config]:
     """
     Returns (train_transform, eval_transform)
     using your PaperImageTransform.from_config().
     """
-    train_t = PaperImageTransform.from_config(cfg, train=True)
-    eval_t = PaperImageTransform.from_config(cfg, train=False)
+    train_t = build_transform_from_config.from_config(cfg, train=True)
+    eval_t = build_transform_from_config.from_config(cfg, train=False)
     return train_t, eval_t
 
 

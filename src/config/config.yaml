@@ -42,22 +42,27 @@ early_stop:
 
 transform:
   input_size: 105
-  component_apply_prob: 0.5
-  rotation_deg: [-10.0, 10.0]
-  shear_x: [-0.3, 0.3]
-  shear_y: [-0.3, 0.3]
-  scale_x: [0.8, 1.2]
-  scale_y: [0.8, 1.2]
-  translate_x: [-2.0, 2.0]
-  translate_y: [-2.0, 2.0]
+  mean: 0.5
+  std: 0.5
+
+data:
+  face_focus:
+    enabled: true
+    size: 105            # must match model input size
+    pre_crop_ratio: 0.90
+    center: [0.0, 0.0]
+    axes: [0.75, 0.90]
+    edge_softness: 0.08
+    mask_power: 2.0
+    randomize_background: true
+    background_noise_std: 0.08
+    jitter_center: 0.03
+    jitter_axes: 0.05
+    background_fill: 0.5
 
 model:
   in_channels: 1
   embedding_dim: 4096
-
-data:
-  image_ext: ".jpg"
-  strict_exists: true
 
 runtime:
   num_workers: 2
