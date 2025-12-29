@@ -93,25 +93,25 @@ def read_model_config(path: str | Path, write_back: bool = True) -> Dict[str, An
     updated |= _deep_set(cfg, "paper.jitter.hue", 0.02)
 
 
-# -------------------------
-# Shared augmentations (optional)
-# -------------------------
-updated |= _deep_set(cfg, "augment.hflip.enabled", True)
-updated |= _deep_set(cfg, "augment.hflip.p", 0.5)
+    # -------------------------
+    # Shared augmentations (optional)
+    # -------------------------
+    updated |= _deep_set(cfg, "augment.hflip.enabled", True)
+    updated |= _deep_set(cfg, "augment.hflip.p", 0.5)
 
-updated |= _deep_set(cfg, "augment.rotation.enabled", True)
-updated |= _deep_set(cfg, "augment.rotation.degrees", 5.0)
+    updated |= _deep_set(cfg, "augment.rotation.enabled", True)
+    updated |= _deep_set(cfg, "augment.rotation.degrees", 5.0)
 
-updated |= _deep_set(cfg, "augment.blur.enabled", True)
-updated |= _deep_set(cfg, "augment.blur.p", 0.15)
-updated |= _deep_set(cfg, "augment.blur.kernel_size", 3)
-updated |= _deep_set(cfg, "augment.blur.sigma", [0.3, 1.0])
+    updated |= _deep_set(cfg, "augment.blur.enabled", True)
+    updated |= _deep_set(cfg, "augment.blur.p", 0.15)
+    updated |= _deep_set(cfg, "augment.blur.kernel_size", 3)
+    updated |= _deep_set(cfg, "augment.blur.sigma", [0.3, 1.0])
 
-updated |= _deep_set(cfg, "augment.random_erasing.enabled", False)
-updated |= _deep_set(cfg, "augment.random_erasing.p", 0.10)
-updated |= _deep_set(cfg, "augment.random_erasing.scale", [0.02, 0.08])
-updated |= _deep_set(cfg, "augment.random_erasing.ratio", [0.3, 3.3])
-updated |= _deep_set(cfg, "augment.random_erasing.value", 0.0)
+    updated |= _deep_set(cfg, "augment.random_erasing.enabled", False)
+    updated |= _deep_set(cfg, "augment.random_erasing.p", 0.10)
+    updated |= _deep_set(cfg, "augment.random_erasing.scale", [0.02, 0.08])
+    updated |= _deep_set(cfg, "augment.random_erasing.ratio", [0.3, 3.3])
+    updated |= _deep_set(cfg, "augment.random_erasing.value", 0.0)
 
 
     # -------------------------
