@@ -48,8 +48,8 @@ transform:
 
 data:
   face_focus:
-    enabled: false
-    remove_background: true
+    enabled: true
+    remove_background: false
 
   image_ext: ".jpg"
   strict_exists: true

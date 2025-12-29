@@ -5,17 +5,17 @@ from typing import Tuple
 import torch
 import torch.nn as nn
 
-from src.models.paper_cnn import PaperCNNEncoder
-from src.models.paper_head import PaperWeightedL1Head
+from src.models.cnn_encoder import CNNEncoder
+from src.models.head import WeightedL1Head
 
 
 class PaperSiameseModel(nn.Module):
     """
     Full paper-style Siamese model:
 
-      x1 -> shared PaperCNNEncoder -> h1 (B,4096)
-      x2 -> shared PaperCNNEncoder -> h2 (B,4096)
-      p_same = PaperWeightedL1Head(h1, h2) -> (B,1)
+      x1 -> shared CNNEncoder -> h1 (B,4096)
+      x2 -> shared CNNEncoder -> h2 (B,4096)
+      p_same = WeightedL1Head(h1, h2) -> (B,1)
 
     Returns:
       p_same, h1, h2
@@ -30,8 +30,8 @@ class PaperSiameseModel(nn.Module):
         if embedding_dim != 4096:
             raise ValueError("Paper model uses embedding_dim=4096. If you change it, it's not paper-exact.")
 
-        self.encoder = PaperCNNEncoder(in_channels=in_channels, enforce_105=enforce_105)
-        self.head = PaperWeightedL1Head(embedding_dim=embedding_dim)
+        self.encoder = CNNEncoder(in_channels=in_channels, enforce_105=enforce_105)
+        self.head = WeightedL1Head(embedding_dim=embedding_dim)
 
     def forward_once(self, x: torch.Tensor) -> torch.Tensor:
         """

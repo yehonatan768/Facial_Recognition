@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 
 
-class PaperWeightedL1Head(nn.Module):
+class WeightedL1Head(nn.Module):
     """
     Koch et al. (2015) Siamese join layer (Section 3.1):
 
@@ -68,7 +68,7 @@ class PaperWeightedL1Head(nn.Module):
 
 
 if __name__ == "__main__":
-    head = PaperWeightedL1Head(embedding_dim=4096)
+    head = WeightedL1Head(embedding_dim=4096)
     h1 = torch.randn(4, 4096)
     h2 = torch.randn(4, 4096)
     p = head(h1, h2)

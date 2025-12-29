@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 
 
-class PaperCNNEncoder(nn.Module):
+class CNNEncoder(nn.Module):
     """
     Koch et al. (2015) Siamese CNN encoder (Figure 4) for Omniglot.
 
@@ -40,25 +40,25 @@ class PaperCNNEncoder(nn.Module):
         # valid conv => padding=0, stride=1
         self.conv1 = nn.Sequential(
             nn.Conv2d(in_channels, 64, kernel_size=10, stride=1, padding=0),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
         )
 
         self.conv2 = nn.Sequential(
             nn.Conv2d(64, 128, kernel_size=7, stride=1, padding=0),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
         )
 
         self.conv3 = nn.Sequential(
             nn.Conv2d(128, 128, kernel_size=4, stride=1, padding=0),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
         )
 
         self.conv4 = nn.Sequential(
             nn.Conv2d(128, 256, kernel_size=4, stride=1, padding=0),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(inplace=True),
         )
 
         # Paper fixed input size 105x105 => 256x6x6 before FC
@@ -106,7 +106,7 @@ def paper_feature_map_shapes() -> Tuple[Tuple[int, int, int], ...]:
 
 if __name__ == "__main__":
     # Sanity check: confirm exact dimensions for paper input
-    net = PaperCNNEncoder(in_channels=1, enforce_105=True)
+    net = CNNEncoder(in_channels=1, enforce_105=True)
     x = torch.randn(2, 1, 105, 105)
     h = net(x)
     print("embedding:", h.shape)  # expected: torch.Size([2, 4096])
