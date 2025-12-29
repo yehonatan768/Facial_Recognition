@@ -9,12 +9,17 @@ data:
   strict_exists: true
 
 pipeline:
-  mode: advanced   # paper | advanced
+  mode: advanced
 
-transform:
-  input_size: 105
-  mean: 0.5
-  std: 0.5
+advanced:
+  pre_crop_ratio: 0.90
+
+  face_mask:
+    center: [0.0, 0.0]
+    axes: [0.75, 0.90]
+    edge_softness: 0.08
+    power: 1.5
+
 
 paper:
   enable_jitter: true
@@ -23,14 +28,3 @@ paper:
     contrast: 0.3
     saturation: 0.3
     hue: 0.02
-
-advanced:
-  pre_crop_ratio: 0.90
-  background_remover:
-    enabled: true
-    backend: torchvision_deeplabv3
-    device: gpu
-    threshold: 0.35
-    min_fg_fraction: 0.02
-    fg_black_threshold: 12
-    min_gray_variance: 5.0

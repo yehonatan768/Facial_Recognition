@@ -4,7 +4,7 @@ from typing import Any, Dict
 
 from torchvision import transforms
 
-from src.preprocess.background_remove import BackgroundRemover, BgRemoveConfig
+from src.preprocess.face_mask import EllipseFaceMask
 from src.preprocess.paper_transforms import PaperImageTransform
 from src.preprocess.preprocess import CenterCropMinSide
 
@@ -20,13 +20,8 @@ def _require(cfg: Dict[str, Any], path: str) -> Any:
 
 def build_transform_from_config(cfg: Dict[str, Any], train: bool) -> transforms.Compose:
     """
-    pipeline.mode = "paper":
-      PaperImageTransform
-
-    pipeline.mode = "advanced":
-      CenterCropMinSide -> (optional BackgroundRemover) -> Grayscale -> Resize -> ToTensor -> Normalize
-
-    NOTE: Advanced currently does background removal only (no face mask).
+    Modular preprocessing pipeline.
+    Easy to extend by appending steps.
     """
     mode = str(_require(cfg, "pipeline.mode")).strip().lower()
 
@@ -38,14 +33,29 @@ def build_transform_from_config(cfg: Dict[str, Any], train: bool) -> transforms.
         return PaperImageTransform.from_config(cfg=cfg, train=train).t
 
     if mode != "advanced":
-        raise ValueError(f"Invalid pipeline.mode='{mode}'. Expected 'paper' or 'advanced'.")
+        raise ValueError(f"Invalid pipeline.mode='{mode}'")
 
-    # Crop first (helps segmentation focus on the subject/face)
-    pre_crop_ratio = float(_require(cfg, "advanced.pre_crop_ratio"))
-    crop = CenterCropMinSide(ratio=pre_crop_ratio)
+    ops = []
 
-    # Build tail (always applied)
-    tail = transforms.Compose(
+    # ---- 1. Center crop ----
+    ops.append(
+        CenterCropMinSide(
+            ratio=float(_require(cfg, "advanced.pre_crop_ratio"))
+        )
+    )
+
+    # ---- 2. Face mask (RESTORED) ----
+    ops.append(
+        EllipseFaceMask(
+            center=tuple(_require(cfg, "advanced.face_mask.center")),
+            axes=tuple(_require(cfg, "advanced.face_mask.axes")),
+            edge_softness=float(_require(cfg, "advanced.face_mask.edge_softness")),
+            power=float(_require(cfg, "advanced.face_mask.power")),
+        )
+    )
+
+    # ---- 3. Final tensor steps ----
+    ops.extend(
         [
             transforms.Grayscale(num_output_channels=1),
             transforms.Resize((input_size, input_size)),
@@ -54,22 +64,4 @@ def build_transform_from_config(cfg: Dict[str, Any], train: bool) -> transforms.
         ]
     )
 
-    # Compose ops in order
-    ops = [crop]
-
-    # Only create + append BackgroundRemover when enabled
-    bg_enabled = bool(_require(cfg, "advanced.background_remover.enabled"))
-    if bg_enabled:
-        bg_cfg = BgRemoveConfig(
-            enabled=True,
-            backend=str(_require(cfg, "advanced.background_remover.backend")),
-            device=str(_require(cfg, "advanced.background_remover.device")),
-            threshold=float(_require(cfg, "advanced.background_remover.threshold")),
-            min_fg_fraction=float(_require(cfg, "advanced.background_remover.min_fg_fraction")),
-            fg_black_threshold=int(_require(cfg, "advanced.background_remover.fg_black_threshold")),
-            min_gray_variance=float(_require(cfg, "advanced.background_remover.min_gray_variance")),
-        )
-        ops.append(BackgroundRemover(bg_cfg))
-
-    ops.append(tail)
     return transforms.Compose(ops)
