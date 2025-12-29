@@ -2,7 +2,7 @@
 # Paths
 # =========================
 paths:
-  project_root: ""            # auto-resolved by read_config.py
+  project_root: ""
   images_root: images
   pairs_train: assets/pairsDevTrain.txt
   pairs_test: assets/pairsDevTest.txt
@@ -12,11 +12,10 @@ paths:
 # =========================
 optim:
   lr: 0.005
-  lr_decay: 0.985
-  momentum_start: 0.5
-  momentum_final: 0.85
-  momentum_ramp_epochs: 40
-
+  lr_decay: 0.995
+  momentum_start: 0.3
+  momentum_final: 0.9
+  momentum_ramp_epochs: 200
 
 # =========================
 # Data
@@ -29,7 +28,7 @@ data:
 # Pipeline
 # =========================
 pipeline:
-  mode: advanced              # paper | advanced
+  mode: advanced  # paper | advanced
 
 # =========================
 # Transform (shared)
@@ -40,11 +39,29 @@ transform:
   std: 0.5
 
 # =========================
+# Deterministic filters (train/val/test)
+# =========================
+filters:
+  equalize:
+    enabled: true
+    method: autocontrast     # autocontrast | equalize | clahe
+    autocontrast_cutoff: 1.0
+    autocontrast_ignore: null
+    clahe_clip_limit: 2.0
+    clahe_tile_grid_size: 8
+
+  edge:
+    enabled: true
+    method: find_edges       # currently only find_edges
+    mode: mix                # mix | edges_only
+    alpha: 0.20              # keep small so texture still dominates
+    blur_radius: 0.6         # mild smoothing to reduce edge noise
+
+# =========================
 # Advanced pipeline (FACE MASK)
 # =========================
 advanced:
   pre_crop_ratio: 0.92
-
   face_mask:
     center: [0.0, 0.0]
     axes: [0.75, 0.90]
@@ -52,7 +69,7 @@ advanced:
     power: 1.5
 
 # =========================
-# Paper pipeline (if used)
+# Paper pipeline
 # =========================
 paper:
   enable_jitter: true
@@ -61,6 +78,31 @@ paper:
     contrast: 0.2
     saturation: 0.2
     hue: 0.01
+
+# =========================
+# Train-only augmentations
+# =========================
+augment:
+  hflip:
+    enabled: true
+    p: 0.5
+
+  rotation:
+    enabled: true
+    degrees: 5.0
+
+  blur:
+    enabled: true
+    p: 0.15
+    kernel_size: 3
+    sigma: [0.3, 1.0]
+
+  random_erasing:
+    enabled: false
+    p: 0.10
+    scale: [0.02, 0.08]
+    ratio: [0.3, 3.3]
+    value: 0.0
 
 # =========================
 # Training
@@ -93,29 +135,7 @@ model:
 # =========================
 early_stop:
   enabled: true
-  monitor: val_acc          # val_acc | val_loss
-  mode: max                 # max for acc, min for loss
-  patience: 30
+  monitor: val_loss
+  mode: min
+  patience: 20
   min_delta: 0.0
-
-augment:
-  hflip:
-    enabled: true
-    p: 0.5
-
-  rotation:
-    enabled: true
-    degrees: 4.0        # use 3.0–5.0 for “light rotation”
-
-  blur:
-    enabled: true
-    p: 0.15
-    kernel_size: 3
-    sigma: [0.3, 1.0]   # min/max sigma
-
-  random_erasing:
-    enabled: false
-    p: 0.10
-    scale: [0.02, 0.08]
-    ratio: [0.3, 3.3]
-    value: 0.0
