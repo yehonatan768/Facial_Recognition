@@ -48,7 +48,7 @@ transform:
 
 data:
   face_focus:
-    enabled: true
+    enabled: false
     remove_background: true
 
   image_ext: ".jpg"
