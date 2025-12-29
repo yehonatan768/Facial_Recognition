@@ -11,11 +11,11 @@ paths:
 # Optimization
 # =========================
 optim:
-  lr: 0.005
-  lr_decay: 0.995
-  momentum_start: 0.3
+  lr: 0.002
+  lr_decay: 0.99
+  momentum_start: 0.6
   momentum_final: 0.9
-  momentum_ramp_epochs: 200
+  momentum_ramp_epochs: 60
 
 # =========================
 # Data
@@ -54,8 +54,8 @@ filters:
     enabled: true
     method: find_edges       # currently only find_edges
     mode: mix                # mix | edges_only
-    alpha: 0.20              # keep small so texture still dominates
-    blur_radius: 0.6         # mild smoothing to reduce edge noise
+    alpha: 0.10              # keep small so texture still dominates
+    blur_radius: 0.8         # mild smoothing to reduce edge noise
 
 # =========================
 # Advanced pipeline (FACE MASK)
@@ -98,7 +98,7 @@ augment:
     sigma: [0.3, 1.0]
 
   random_erasing:
-    enabled: false
+    enabled: true
     p: 0.10
     scale: [0.02, 0.08]
     ratio: [0.3, 3.3]
@@ -110,14 +110,14 @@ augment:
 train:
   seed: 42
   epochs: 200
-  batch_size: 128
+  batch_size: 64
   dump_every: 10
 
 # =========================
 # Split strategy
 # =========================
 split:
-  val_ratio: 0.25
+  val_ratio: 0.3
   target_pos_frac: 0.50
   min_val_identities: 30
   seed: 42
