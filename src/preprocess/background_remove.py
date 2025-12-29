@@ -83,6 +83,20 @@ class BackgroundRemover:
     def __init__(self, cfg: BgRemoveConfig):
         self.cfg = cfg
         backend = str(cfg.backend).strip().lower()
+
+        # Allow a no-op backend
+        if backend in ("none", "off", "disabled"):
+            self.cfg = BgRemoveConfig(
+                enabled=False,
+                backend="none",
+                device=str(cfg.device),
+                threshold=float(cfg.threshold),
+                min_fg_fraction=float(cfg.min_fg_fraction),
+                fg_black_threshold=int(cfg.fg_black_threshold),
+                min_gray_variance=float(cfg.min_gray_variance),
+            )
+            return
+
         if backend != "torchvision_deeplabv3":
             raise ValueError(f"Unsupported background remover backend: {cfg.backend!r}")
 

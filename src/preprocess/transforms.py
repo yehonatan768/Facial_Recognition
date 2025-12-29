@@ -24,7 +24,7 @@ def build_transform_from_config(cfg: Dict[str, Any], train: bool) -> transforms.
       PaperImageTransform
 
     pipeline.mode = "advanced":
-      CenterCropMinSide -> DeepLabV3(person) -> Grayscale -> Resize -> ToTensor -> Normalize
+      CenterCropMinSide -> (optional BackgroundRemover) -> Grayscale -> Resize -> ToTensor -> Normalize
 
     NOTE: Advanced currently does background removal only (no face mask).
     """
@@ -44,18 +44,7 @@ def build_transform_from_config(cfg: Dict[str, Any], train: bool) -> transforms.
     pre_crop_ratio = float(_require(cfg, "advanced.pre_crop_ratio"))
     crop = CenterCropMinSide(ratio=pre_crop_ratio)
 
-    bg_enabled = bool(_require(cfg, "advanced.background_remover.enabled"))
-    bg_cfg = BgRemoveConfig(
-        enabled=bg_enabled,
-        backend=str(_require(cfg, "advanced.background_remover.backend")),
-        device=str(_require(cfg, "advanced.background_remover.device")),
-        threshold=float(_require(cfg, "advanced.background_remover.threshold")),
-        min_fg_fraction=float(_require(cfg, "advanced.background_remover.min_fg_fraction")),
-        fg_black_threshold=int(_require(cfg, "advanced.background_remover.fg_black_threshold")),
-        min_gray_variance=float(_require(cfg, "advanced.background_remover.min_gray_variance")),
-    )
-    remover = BackgroundRemover(bg_cfg)
-
+    # Build tail (always applied)
     tail = transforms.Compose(
         [
             transforms.Grayscale(num_output_channels=1),
@@ -65,9 +54,22 @@ def build_transform_from_config(cfg: Dict[str, Any], train: bool) -> transforms.
         ]
     )
 
+    # Compose ops in order
     ops = [crop]
-    if bg_enabled:
-        ops.append(remover)
-    ops.append(tail)
 
+    # Only create + append BackgroundRemover when enabled
+    bg_enabled = bool(_require(cfg, "advanced.background_remover.enabled"))
+    if bg_enabled:
+        bg_cfg = BgRemoveConfig(
+            enabled=True,
+            backend=str(_require(cfg, "advanced.background_remover.backend")),
+            device=str(_require(cfg, "advanced.background_remover.device")),
+            threshold=float(_require(cfg, "advanced.background_remover.threshold")),
+            min_fg_fraction=float(_require(cfg, "advanced.background_remover.min_fg_fraction")),
+            fg_black_threshold=int(_require(cfg, "advanced.background_remover.fg_black_threshold")),
+            min_gray_variance=float(_require(cfg, "advanced.background_remover.min_gray_variance")),
+        )
+        ops.append(BackgroundRemover(bg_cfg))
+
+    ops.append(tail)
     return transforms.Compose(ops)

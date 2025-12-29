@@ -28,8 +28,8 @@ advanced:
   pre_crop_ratio: 0.90
   background_remover:
     enabled: true
-    backend: none
-    device: cpu
+    backend: torchvision_deeplabv3
+    device: gpu
     threshold: 0.35
     min_fg_fraction: 0.02
     fg_black_threshold: 12
