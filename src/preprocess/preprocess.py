@@ -121,18 +121,19 @@ def build_face_mask_transform(
     cfg: FaceMaskConfig,
     normalize_mean: float,
     normalize_std: float,
+    apply_crop: bool,
 ) -> transforms.Compose:
     """
-    If cfg.enabled = False:
-      Grayscale -> Resize -> ToTensor -> Normalize
-
-    If cfg.enabled = True:
+    If apply_crop=True and cfg.enabled=True:
       CenterCrop -> Grayscale -> Resize -> ToTensor -> EllipseMask -> Normalize
+
+    If apply_crop=False:
+      Grayscale -> Resize -> ToTensor -> (optional EllipseMask) -> Normalize
     """
 
     ops = []
 
-    if cfg.enabled:
+    if apply_crop and cfg.enabled:
         ops.append(CenterCropMinSide(ratio=cfg.pre_crop_ratio))
 
     ops.extend([
@@ -145,6 +146,6 @@ def build_face_mask_transform(
         ops.append(SoftEllipseMask(cfg=cfg, train=train))
 
     ops.append(transforms.Normalize(mean=[normalize_mean], std=[normalize_std]))
-
     return transforms.Compose(ops)
+
 
