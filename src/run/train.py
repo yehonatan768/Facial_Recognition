@@ -27,6 +27,7 @@ from src.training.early_stop import EarlyStopping
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 os.environ["ORT_LOGGING_LEVEL"] = "4"  # 0=verbose ... 4=fatal
 os.environ["ORT_LOG_SEVERITY_LEVEL"] = "4"
+os.environ["OPENCV_LOG_LEVEL"] = "SILENT"
 
 def _require(cfg: Dict[str, Any], path: str) -> Any:
     cur: Any = cfg
