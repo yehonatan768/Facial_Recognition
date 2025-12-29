@@ -162,7 +162,6 @@ def main() -> None:
     seed = int(_require(cfg, "train.seed"))
     _seed_everything(seed)
 
-    # Reset metrics file on fresh run
     metrics_path = workdir / "metrics.jsonl"
     if not args.resume and metrics_path.exists():
         metrics_path.unlink()
@@ -189,13 +188,7 @@ def main() -> None:
     test_pairs = loaded["test_pairs"]
 
     if len(train_pairs_all) == 0:
-        raise RuntimeError(
-            "No training pairs were loaded (all pairs filtered out as missing).\n"
-            f"images_root={images_root}\n"
-            f"pairs_train={pairs_train_path}\n"
-            f"pairs_test={pairs_test_path}\n"
-            f"ext={ext!r} strict_exists={strict_exists}\n"
-        )
+        raise RuntimeError("No training pairs loaded.")
 
     split_res = split_by_components(
         pairs=train_pairs_all,
@@ -230,10 +223,10 @@ def main() -> None:
 
     es_cfg = cfg.get("early_stop", {}) or {}
     monitor = str(es_cfg.get("monitor", "val_acc"))
-    mode = str(es_cfg.get("mode", "max"))
-    maximize = mode.lower() == "max"
+    maximize = str(es_cfg.get("mode", "max")).lower() == "max"
+
     best_monitor_score = -float("inf") if maximize else float("inf")
-    best_val_acc = -float("inf")  # ALWAYS maximize accuracy for best checkpoint
+    best_val_acc = -float("inf")
 
     if args.resume:
         ckpt = torch.load(args.resume, map_location="cpu")
@@ -243,15 +236,13 @@ def main() -> None:
         best_monitor_score = float(ckpt.get("best_monitor_score", best_monitor_score))
         best_val_acc = float(ckpt.get("best_val_acc", best_val_acc))
 
-        logger.info(
-            f"Resumed from {args.resume} (start_epoch={start_epoch}, "
-            f"best_monitor_score={best_monitor_score:.6f}, best_val_acc={best_val_acc:.6f})"
-        )
+        logger.info(f"Resumed from {args.resume} (epoch {start_epoch})")
 
-    es_enabled = bool(es_cfg.get("enabled", True))
-    patience = int(es_cfg.get("patience", 20))
-    min_delta = float(es_cfg.get("min_delta", 0.0))
-    early = EarlyStopping(patience=patience, min_delta=min_delta, maximize=maximize)
+    early = EarlyStopping(
+        patience=int(es_cfg.get("patience", 20)),
+        min_delta=float(es_cfg.get("min_delta", 0.0)),
+        maximize=maximize,
+    )
 
     epochs = int(_require(cfg, "train.epochs"))
     dump_every = int(_require(cfg, "train.dump_every"))
@@ -262,12 +253,13 @@ def main() -> None:
     ckpt_last = ckpt_dir / "last.pt"
 
     logger.info(
-        f"Train pairs: {len(train_pairs)} | Val pairs: {len(val_pairs)} | Test pairs: {len(test_pairs) if test_pairs else 0}"
-    )
-    logger.info(
-        f"epochs={epochs} batch_size={cfg.get('train', {}).get('batch_size', '??')} monitor={monitor} mode={mode} early_stop={es_enabled}"
+        f"Train={len(train_pairs)} | Val={len(val_pairs)} | Test={len(test_pairs) if test_pairs else 0} | "
+        f"epochs={epochs} batch_size={cfg['train']['batch_size']}"
     )
 
+    # =========================
+    # Training loop
+    # =========================
     for epoch in range(start_epoch, epochs + 1):
         sched_info: Dict[str, float] = {}
         if scheduler is not None:
@@ -275,7 +267,7 @@ def main() -> None:
 
         tr_stats = train_one_epoch(model=model, loader=train_loader, device=device, optimizer=optimizer)
 
-        do_dump = (epoch == start_epoch) or (dump_every > 0 and (epoch % dump_every == 0))
+        do_dump = (epoch == start_epoch) or (dump_every > 0 and epoch % dump_every == 0)
 
         va_stats, dump_path = run_val_and_dump(
             model=model,
@@ -289,54 +281,49 @@ def main() -> None:
         lr = float(sched_info.get("lr", optimizer.param_groups[0].get("lr", 0.0)))
         mom = float(sched_info.get("momentum", optimizer.param_groups[0].get("momentum", 0.0)))
 
-        monitor_score = _get_monitor_score(
-            monitor,
-            val_loss=float(va_stats.loss),
-            val_acc=float(va_stats.acc),
-        )
+        monitor_score = _get_monitor_score(monitor, va_stats.loss, va_stats.acc)
 
         logger.info(
             f"Epoch {epoch:03d}/{epochs:03d} | "
             f"train_loss={tr_stats.loss:.6f} val_loss={va_stats.loss:.6f} | "
             f"train_acc={tr_stats.acc:.4f} val_acc={va_stats.acc:.4f} | "
             f"lr={lr:.8f} momentum={mom:.3f}"
-            + (f" | val_dump={dump_path}" if dump_path is not None else "")
         )
 
-        row = {
-            "epoch": int(epoch),
-            "train_loss": float(tr_stats.loss),
-            "train_acc": float(tr_stats.acc),
-            "val_loss": float(va_stats.loss),
-            "val_acc": float(va_stats.acc),
-            "lr": float(lr),
-            "momentum": float(mom),
-        }
-        with metrics_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(row) + "\n")
-
-        # Always save last
+        # Save last
         _save_ckpt(ckpt_last, model, optimizer, epoch, best_monitor_score, best_val_acc, cfg)
 
-        # Save BEST checkpoint by val_acc only
-        cur_val_acc = float(va_stats.acc)
-        if cur_val_acc > best_val_acc:
-            best_val_acc = cur_val_acc
+        # Save best by val_acc
+        if va_stats.acc > best_val_acc:
+            best_val_acc = float(va_stats.acc)
             _save_ckpt(ckpt_best, model, optimizer, epoch, best_monitor_score, best_val_acc, cfg)
+            logger.info(f"[New best] epoch={epoch} | val_acc={best_val_acc:.4f}")
 
-        # Update best_monitor_score for logging (early stop uses monitor_score)
-        improved_monitor = (monitor_score > best_monitor_score) if maximize else (monitor_score < best_monitor_score)
-        if improved_monitor:
+        # Update monitor score
+        improved = (monitor_score > best_monitor_score) if maximize else (monitor_score < best_monitor_score)
+        if improved:
             best_monitor_score = monitor_score
 
-        if es_enabled and early.update(epoch=epoch, score=monitor_score).should_stop:
+        # Periodic checkpoint status
+        if epoch % 10 == 0 or epoch == epochs:
             logger.info(
-                f"Early stop at epoch {epoch} "
-                f"(best_monitor_score={best_monitor_score:.6f}, best_val_acc={best_val_acc:.6f})"
+                f"[Checkpoint status] epoch={epoch} | best_val_acc={best_val_acc:.4f} | best_ckpt={ckpt_best}"
+            )
+
+        if early.update(epoch=epoch, score=monitor_score).should_stop:
+            logger.info(
+                f"Early stopping at epoch {epoch} | "
+                f"best_val_acc={best_val_acc:.4f}"
             )
             break
 
-        logger.info(f"Training complete. Best checkpoint (by val_acc): {ckpt_best}")
+    # =========================
+    # Final summary
+    # =========================
+    logger.info("Training finished.")
+    logger.info(f"Best checkpoint: {ckpt_best}")
+    logger.info(f"Best validation accuracy: {best_val_acc:.4f}")
+
 
 if __name__ == "__main__":
     main()
