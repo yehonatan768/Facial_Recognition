@@ -78,8 +78,10 @@ def read_model_config(path: str | Path, write_back: bool = True) -> Dict[str, An
     # Advanced pipeline (DeepLabV3)
     updated |= _deep_set(cfg, "advanced.pre_crop_ratio", 0.90)
 
-    updated |= _deep_set(cfg, "advanced.background_remover.enabled", True)
-    updated |= _deep_set(cfg, "advanced.background_remover.backend", "torchvision_deeplabv3")
+    b = cfg["advanced"]["background_remover"]["backend"]
+    print("backend repr:", repr(b))
+    print("backend codepoints:", [ord(c) for c in b])
+    print("enabled:", cfg["advanced"]["background_remover"]["enabled"])
 
     # IMPORTANT: CPU is safest with DataLoader workers
     updated |= _deep_set(cfg, "advanced.background_remover.device", "cpu")

@@ -75,14 +75,13 @@ def _get_model(device: str) -> torch.nn.Module:
 
 
 class BackgroundRemover:
-    """
-    Apply DeepLabV3 person segmentation; set background to black.
-    Includes safety fallback to avoid producing empty (black) samples.
-    """
-
     def __init__(self, cfg: BgRemoveConfig):
         self.cfg = cfg
-        backend = str(cfg.backend).strip().lower()
+
+        raw = str(cfg.backend)
+
+        # Robust normalization: keep only [a-z0-9_]
+        backend = "".join(ch for ch in raw.strip().lower() if (ch.isalnum() or ch == "_"))
 
         # Allow a no-op backend
         if backend in ("none", "off", "disabled"):
@@ -97,8 +96,21 @@ class BackgroundRemover:
             )
             return
 
-        if backend != "torchvision_deeplabv3":
-            raise ValueError(f"Unsupported background remover backend: {cfg.backend!r}")
+        # Accept deeplab backend aliases
+        if backend in ("torchvision_deeplabv3", "deeplabv3"):
+            # normalize stored backend (optional)
+            self.cfg = BgRemoveConfig(
+                enabled=bool(cfg.enabled),
+                backend="torchvision_deeplabv3",
+                device=str(cfg.device),
+                threshold=float(cfg.threshold),
+                min_fg_fraction=float(cfg.min_fg_fraction),
+                fg_black_threshold=int(cfg.fg_black_threshold),
+                min_gray_variance=float(cfg.min_gray_variance),
+            )
+            return
+
+        raise ValueError(f"Unsupported background remover backend: {cfg.backend!r}")
 
     @torch.no_grad()
     def __call__(self, img: Image.Image) -> Image.Image:
