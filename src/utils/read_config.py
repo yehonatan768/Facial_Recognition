@@ -58,7 +58,7 @@ def read_model_config(path: str | Path, write_back: bool = True) -> Dict[str, An
 
     updated = False
 
-    # ---- Always store resolved project_root (for notebooks / portability) ----
+    # Always store resolved project_root
     cfg.setdefault("paths", {})
     if not isinstance(cfg["paths"], dict):
         cfg["paths"] = {}
@@ -68,31 +68,31 @@ def read_model_config(path: str | Path, write_back: bool = True) -> Dict[str, An
         cfg["paths"]["project_root"] = str(project_root)
         updated = True
 
-    # ---- Ensure portable paths exist ----
+    # Portable paths
     updated |= _deep_set(cfg, "paths.images_root", "images")
     updated |= _deep_set(cfg, "paths.pairs_train", "assets/pairsDevTrain.txt")
     updated |= _deep_set(cfg, "paths.pairs_test", "assets/pairsDevTest.txt")
 
-    # ---- Data defaults required by loaders ----
+    # Loader settings
     updated |= _deep_set(cfg, "data.image_ext", ".jpg")
     updated |= _deep_set(cfg, "data.strict_exists", True)
 
-    # ---- Required transform keys ----
+    # Shared transform settings
     updated |= _deep_set(cfg, "transform.input_size", 105)
     updated |= _deep_set(cfg, "transform.mean", 0.5)
     updated |= _deep_set(cfg, "transform.std", 0.5)
 
-    # ---- Pipeline selection (paper vs advanced) ----
+    # Pipeline selection
     updated |= _deep_set(cfg, "pipeline.mode", "paper")  # set explicitly in YAML later
 
-    # ---- Paper pipeline keys (required by PaperImageTransform.from_config) ----
+    # Paper pipeline params
     updated |= _deep_set(cfg, "paper.enable_jitter", True)
     updated |= _deep_set(cfg, "paper.jitter.brightness", 0.3)
     updated |= _deep_set(cfg, "paper.jitter.contrast", 0.3)
     updated |= _deep_set(cfg, "paper.jitter.saturation", 0.3)
     updated |= _deep_set(cfg, "paper.jitter.hue", 0.02)
 
-    # ---- Advanced pipeline keys (required by build_transform_from_config when mode=advanced) ----
+    # Advanced pipeline params (background remover only)
     updated |= _deep_set(cfg, "advanced.pre_crop_ratio", 0.90)
     updated |= _deep_set(cfg, "advanced.background_remover.enabled", True)
     updated |= _deep_set(cfg, "advanced.background_remover.model", "isnet-general-use")
@@ -103,6 +103,7 @@ def read_model_config(path: str | Path, write_back: bool = True) -> Dict[str, An
     updated |= _deep_set(cfg, "advanced.background_remover.min_fg_fraction", 0.02)
     updated |= _deep_set(cfg, "advanced.background_remover.fg_black_threshold", 12)
     updated |= _deep_set(cfg, "advanced.background_remover.min_gray_variance", 5.0)
+
     if write_back and updated:
         _write_yaml(p, cfg)
 

@@ -18,16 +18,16 @@ class RembgConfig:
     alpha_matting_background_threshold: int
     alpha_matting_erode_size: int
 
-    # NEW: safety fallback
-    min_fg_fraction: float          # e.g. 0.02 (2%)
-    fg_black_threshold: int         # e.g. 12 (0..255)
+    # safety fallback thresholds
+    min_fg_fraction: float
+    fg_black_threshold: int
     min_gray_variance: float
 
 
 class BackgroundRemover:
     """
     rembg-based background removal with a safety fallback:
-    if rembg removes almost everything, return the original image.
+    if rembg removes almost everything, return the original (cropped) image.
     """
 
     def __init__(self, cfg: RembgConfig):

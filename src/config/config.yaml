@@ -49,7 +49,7 @@ early_stop:
 # PIPELINE SWITCH (REQUIRED)
 # ----------------------------
 pipeline:
-  mode: "advanced"   # "paper" or "advanced"
+  mode: advanced   # or paper
 
 transform:
   input_size: 105
@@ -66,16 +66,13 @@ paper:
 
 advanced:
   pre_crop_ratio: 0.90
-
   background_remover:
     enabled: true
-    model: "u2net"
-
+    model: u2net
     alpha_matting: false
     alpha_matting_foreground_threshold: 240
     alpha_matting_background_threshold: 10
     alpha_matting_erode_size: 10
-
     min_fg_fraction: 0.02
     fg_black_threshold: 12
     min_gray_variance: 5.0

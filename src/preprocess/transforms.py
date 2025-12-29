@@ -61,11 +61,8 @@ def build_transform_from_config(cfg: Dict[str, Any], train: bool) -> transforms.
         alpha_matting_erode_size=int(
             _require(cfg, "advanced.background_remover.alpha_matting_erode_size")
         ),
-        # Fail-safe thresholds:
-        # 1) fg fraction threshold
         min_fg_fraction=float(_require(cfg, "advanced.background_remover.min_fg_fraction")),
         fg_black_threshold=int(_require(cfg, "advanced.background_remover.fg_black_threshold")),
-        # 2) variance threshold (NEW)
         min_gray_variance=float(_require(cfg, "advanced.background_remover.min_gray_variance")),
     )
 
