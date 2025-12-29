@@ -4,7 +4,7 @@ from typing import Any, Dict
 
 from torchvision import transforms
 
-from src.preprocess.background_remove import BackgroundRemover, RembgConfig
+from src.preprocess.background_remove import BackgroundRemover, MpSegConfig
 from src.preprocess.paper_transforms import PaperImageTransform
 from src.preprocess.preprocess import CenterCropMinSide
 
@@ -24,10 +24,9 @@ def build_transform_from_config(cfg: Dict[str, Any], train: bool) -> transforms.
       PaperImageTransform
 
     pipeline.mode = "advanced":
-      CenterCropMinSide -> rembg -> Grayscale -> Resize -> ToTensor -> Normalize
+      CenterCropMinSide -> MediaPipe segmentation -> Grayscale -> Resize -> ToTensor -> Normalize
 
     NOTE: Advanced currently does background removal only (no face mask).
-          BackgroundRemover has a safety fallback if rembg removes almost everything.
     """
     mode = str(_require(cfg, "pipeline.mode")).strip().lower()
 
@@ -41,34 +40,24 @@ def build_transform_from_config(cfg: Dict[str, Any], train: bool) -> transforms.
     if mode != "advanced":
         raise ValueError(f"Invalid pipeline.mode='{mode}'. Expected 'paper' or 'advanced'.")
 
-    # Crop first (helps rembg not delete the face)
+    # Crop first (helps segmentation focus on subject)
     pre_crop_ratio = float(_require(cfg, "advanced.pre_crop_ratio"))
     crop = CenterCropMinSide(ratio=pre_crop_ratio)
 
-    # rembg config
+    # MediaPipe background remover config
     bg_enabled = bool(_require(cfg, "advanced.background_remover.enabled"))
-
-    bg_cfg = RembgConfig(
+    bg_cfg = MpSegConfig(
         enabled=bg_enabled,
-        model=str(_require(cfg, "advanced.background_remover.model")),
-        alpha_matting=bool(_require(cfg, "advanced.background_remover.alpha_matting")),
-        alpha_matting_foreground_threshold=int(
-            _require(cfg, "advanced.background_remover.alpha_matting_foreground_threshold")
-        ),
-        alpha_matting_background_threshold=int(
-            _require(cfg, "advanced.background_remover.alpha_matting_background_threshold")
-        ),
-        alpha_matting_erode_size=int(
-            _require(cfg, "advanced.background_remover.alpha_matting_erode_size")
-        ),
+        backend=str(_require(cfg, "advanced.background_remover.backend")),
+        model_selection=int(_require(cfg, "advanced.background_remover.model_selection")),
+        threshold=float(_require(cfg, "advanced.background_remover.threshold")),
         min_fg_fraction=float(_require(cfg, "advanced.background_remover.min_fg_fraction")),
         fg_black_threshold=int(_require(cfg, "advanced.background_remover.fg_black_threshold")),
         min_gray_variance=float(_require(cfg, "advanced.background_remover.min_gray_variance")),
     )
-
     remover = BackgroundRemover(bg_cfg)
 
-    # After rembg: format for model
+    # After background removal: format for model
     tail = transforms.Compose(
         [
             transforms.Grayscale(num_output_channels=1),

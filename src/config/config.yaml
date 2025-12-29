@@ -1,61 +1,38 @@
 paths:
-  images_root: "images"
-  pairs_train: "assets/pairsDevTrain.txt"
-  pairs_test:  "assets/pairsDevTest.txt"
-
-
+  images_root: images
+  pairs_train: assets/pairsDevTrain.txt
+  pairs_test: assets/pairsDevTest.txt
 train:
-  seed: 0
   epochs: 200
   batch_size: 128
-  dump_every: 5
-
-
+  seed: 1337
+  dump_every: 10
 split:
   val_ratio: 0.2
   target_pos_frac: 0.5
-  min_val_identities: 150
-  seed: 0
-
-
+  min_val_identities: 50
+  seed: 1337
 optim:
-  optimizer: sgd
-
   lr: 0.01
-  lr_decay_gamma: 0.995
-
+  lr_decay: 0.99
   momentum_start: 0.5
   momentum_final: 0.9
-  momentum_ramp_epochs: 20
-
-  lr_conv: 0.01
-  lr_fc: 0.01
-  lr_alpha: 0.01
-
+  momentum_ramp_epochs: 100
   weight_decay_conv: 0.0
   weight_decay_fc: 0.0
   weight_decay_alpha: 0.0
-
-
 early_stop:
   enabled: true
-  patience: 20
-  min_delta: 0.0
   monitor: val_loss
   mode: min
-
-
-# ----------------------------
-# PIPELINE SWITCH (REQUIRED)
-# ----------------------------
+  patience: 20
+  min_delta: 0.0
 pipeline:
-  mode: advanced   # or paper
-
+  mode: advanced
 transform:
   input_size: 105
   mean: 0.5
   std: 0.5
-
 paper:
   enable_jitter: true
   jitter:
@@ -63,30 +40,21 @@ paper:
     contrast: 0.3
     saturation: 0.3
     hue: 0.02
-
 advanced:
-  pre_crop_ratio: 0.90
+  pre_crop_ratio: 0.9
   background_remover:
     enabled: true
-    model: u2net
-    alpha_matting: false
-    alpha_matting_foreground_threshold: 240
-    alpha_matting_background_threshold: 10
-    alpha_matting_erode_size: 10
+    backend: mediapipe_selfie
+    model_selection: 1
+    threshold: 0.15
     min_fg_fraction: 0.02
     fg_black_threshold: 12
     min_gray_variance: 5.0
-
 data:
-  image_ext: ".jpg"
+  image_ext: .jpg
   strict_exists: true
-
-
 model:
   in_channels: 1
+  enforce_105: true
   embedding_dim: 4096
-
-
-runtime:
-  num_workers: 2
-  pin_memory: true
+runtime: {}

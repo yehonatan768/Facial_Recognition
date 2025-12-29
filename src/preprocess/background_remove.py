@@ -5,20 +5,25 @@ from dataclasses import dataclass
 import numpy as np
 from PIL import Image
 
-from rembg import new_session, remove
+import mediapipe as mp
 
 
 @dataclass(frozen=True)
-class RembgConfig:
+class MpSegConfig:
+    """
+    MediaPipe Selfie Segmentation config.
+
+    model_selection:
+      0 = general model (default)
+      1 = landscape model (often cleaner on wider shots)
+    """
     enabled: bool
-    model: str
+    backend: str  # must be "mediapipe_selfie"
 
-    alpha_matting: bool
-    alpha_matting_foreground_threshold: int
-    alpha_matting_background_threshold: int
-    alpha_matting_erode_size: int
+    model_selection: int
+    threshold: float
 
-    # safety fallback thresholds
+    # Safety fallback thresholds (same idea as before)
     min_fg_fraction: float
     fg_black_threshold: int
     min_gray_variance: float
@@ -26,13 +31,17 @@ class RembgConfig:
 
 class BackgroundRemover:
     """
-    rembg-based background removal with a safety fallback:
-    if rembg removes almost everything, return the original (cropped) image.
+    MediaPipe-based background removal with safety fallback:
+    If segmentation removes almost everything, return the original image.
     """
 
-    def __init__(self, cfg: RembgConfig):
+    def __init__(self, cfg: MpSegConfig):
         self.cfg = cfg
-        self._session = new_session(cfg.model)
+        if str(cfg.backend).strip().lower() != "mediapipe_selfie":
+            raise ValueError(f"Unsupported background remover backend: {cfg.backend!r}")
+
+        self._mp = mp.solutions.selfie_segmentation
+        self._segmenter = self._mp.SelfieSegmentation(model_selection=int(cfg.model_selection))
 
     def __call__(self, img: Image.Image) -> Image.Image:
         if not isinstance(img, Image.Image):
@@ -42,31 +51,31 @@ class BackgroundRemover:
             return img
 
         inp = img.convert("RGB")
+        rgb = np.asarray(inp, dtype=np.uint8)  # (H,W,3), RGB
 
-        out = remove(
-            inp,
-            session=self._session,
-            alpha_matting=self.cfg.alpha_matting,
-            alpha_matting_foreground_threshold=self.cfg.alpha_matting_foreground_threshold,
-            alpha_matting_background_threshold=self.cfg.alpha_matting_background_threshold,
-            alpha_matting_erode_size=self.cfg.alpha_matting_erode_size,
-        )
+        # MediaPipe expects RGB ndarray
+        res = self._segmenter.process(rgb)
+        mask = getattr(res, "segmentation_mask", None)
 
-        # Force deterministic RGB with black background
-        if out.mode == "RGBA":
-            bg = Image.new("RGBA", out.size, (0, 0, 0, 255))
-            out_rgb = Image.alpha_composite(bg, out).convert("RGB")
-        else:
-            out_rgb = out.convert("RGB")
+        # If mediapipe fails, do not destroy the sample
+        if mask is None:
+            return inp
 
-        # ---- Safety check: did we delete almost everything? ----
+        # Hard threshold (background -> black)
+        thr = float(self.cfg.threshold)
+        fg = (mask > thr)  # (H,W) boolean
+
+        out = np.zeros_like(rgb, dtype=np.uint8)
+        out[fg] = rgb[fg]
+        out_rgb = Image.fromarray(out, mode="RGB")
+
+        # ---- Safety checks: avoid "all black" samples ----
         arr = np.asarray(out_rgb, dtype=np.uint8)
+        bthr = int(self.cfg.fg_black_threshold)
 
-        thr = int(self.cfg.fg_black_threshold)
-        non_black = (arr[..., 0] > thr) | (arr[..., 1] > thr) | (arr[..., 2] > thr)
+        non_black = (arr[..., 0] > bthr) | (arr[..., 1] > bthr) | (arr[..., 2] > bthr)
         fg_frac = float(non_black.mean())
 
-        # variance check (captures cases that are dark but not exactly black)
         gray = (0.299 * arr[..., 0] + 0.587 * arr[..., 1] + 0.114 * arr[..., 2]).astype(np.float32)
         var = float(gray.var())
 
