@@ -51,19 +51,11 @@ early_stop:
 pipeline:
   mode: "advanced"   # "paper" or "advanced"
 
-
-# ----------------------------
-# SHARED NORMALIZATION (REQUIRED)
-# ----------------------------
 transform:
   input_size: 105
   mean: 0.5
   std: 0.5
 
-
-# ----------------------------
-# PAPER PIPELINE PARAMS (REQUIRED)
-# ----------------------------
 paper:
   enable_jitter: true
   jitter:
@@ -72,33 +64,17 @@ paper:
     saturation: 0.3
     hue: 0.02
 
-
-# ----------------------------
-# ADVANCED PIPELINE PARAMS (REQUIRED)
 advanced:
+  pre_crop_ratio: 0.90
+
   background_remover:
     enabled: true
-    model: "isnet-general-use"   # often better for people than u2net
+    model: "isnet-general-use"
 
     alpha_matting: true
     alpha_matting_foreground_threshold: 240
     alpha_matting_background_threshold: 10
     alpha_matting_erode_size: 10
-
-  face_mask:
-    enabled: true
-    size: 105
-    pre_crop_ratio: 0.90
-    center: [0.0, 0.0]
-    axes: [0.75, 0.90]
-    edge_softness: 0.08
-    mask_power: 2.0
-    jitter_center: 0.03
-    jitter_axes: 0.05
-    randomize_outside: false
-    outside_noise_std: 0.08
-    outside_fill: 0.0   # black outside mask
-
 
 data:
   image_ext: ".jpg"

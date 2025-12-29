@@ -22,7 +22,6 @@ class PaperImageTransform:
     """
     Paper pipeline:
       Grayscale -> Resize -> (optional jitter) -> ToTensor -> Normalize
-    All parameters must come from config.
     """
 
     train: bool
@@ -37,9 +36,10 @@ class PaperImageTransform:
     jitter_hue: float
 
     def __post_init__(self) -> None:
-        ops = []
-        ops.append(transforms.Grayscale(num_output_channels=1))
-        ops.append(transforms.Resize((self.input_size, self.input_size)))
+        ops = [
+            transforms.Grayscale(num_output_channels=1),
+            transforms.Resize((self.input_size, self.input_size)),
+        ]
 
         if self.train and self.enable_jitter:
             ops.append(
@@ -51,8 +51,13 @@ class PaperImageTransform:
                 )
             )
 
-        ops.append(transforms.ToTensor())
-        ops.append(transforms.Normalize(mean=[self.mean], std=[self.std]))
+        ops.extend(
+            [
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[self.mean], std=[self.std]),
+            ]
+        )
+
         self.t = transforms.Compose(ops)
 
     def __call__(self, img: Image.Image) -> torch.Tensor:

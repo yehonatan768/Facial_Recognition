@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
-
 from PIL import Image
+
 from rembg import new_session, remove
 
 
@@ -12,7 +11,7 @@ class RembgConfig:
     enabled: bool
     model: str
 
-    # Optional quality controls (set explicitly in config)
+    # Quality controls (explicitly set in config)
     alpha_matting: bool
     alpha_matting_foreground_threshold: int
     alpha_matting_background_threshold: int
