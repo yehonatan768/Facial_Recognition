@@ -8,37 +8,28 @@ from PIL import Image
 from torchvision import transforms
 from torchvision.transforms import functional as TF
 
-from src.preprocess.background_remove import BackgroundRemover
 
-@dataclass
-class FaceFocusConfig:
-    # Target size for the network
+@dataclass(frozen=True)
+class FaceMaskConfig:
+    enabled: bool
+
     size: int
-
-    # Pre-crop: crop around center before resizing to 'size'
-    # 1.0 = crop to the shorter side (square crop)
-    # <1.0 = tighter crop (zooms in). Recommended: 0.85 - 0.95
     pre_crop_ratio: float
 
-    # Ellipse mask parameters (in normalized coordinates [-1..1])
-    center: Tuple[float, float]      # (cx, cy)
-    axes: Tuple[float, float]     # (ax, ay)
-    edge_softness: float                   # bigger = softer edge
-
-    # Mask shaping: >1 makes the outside fall off faster (less background leakage)
-    # Recommended: 1.5 - 3.0. Try 2.0.
+    # Ellipse params in normalized coords [-1..1]
+    center: Tuple[float, float]
+    axes: Tuple[float, float]
+    edge_softness: float
     mask_power: float
 
-    # If True, add noise outside mask instead of constant
-    randomize_background: bool
-    background_noise_std: float          # noise in [0,1] scale
+    # Train-time jitter
+    jitter_center: float
+    jitter_axes: float
 
-    # Small random jitter of ellipse per image (train only)
-    jitter_center: float                # +/- jitter in normalized coords
-    jitter_axes: float                    # +/- relative jitter on axes
-
-    # What value to use outside mask (if not randomizing)
-    background_fill: float                 # mid-gray
+    # Outside fill behavior
+    randomize_outside: bool
+    outside_noise_std: float
+    outside_fill: float  # set to 0.0 for black
 
 
 class CenterCropMinSide(torch.nn.Module):
@@ -46,7 +37,8 @@ class CenterCropMinSide(torch.nn.Module):
     Center-crop a PIL image to a square based on the shorter side.
     Optionally crop tighter with ratio < 1.0 to zoom in.
     """
-    def __init__(self, ratio: float = 1.0):
+
+    def __init__(self, ratio: float):
         super().__init__()
         self.ratio = float(ratio)
 
@@ -67,9 +59,10 @@ class CenterCropMinSide(torch.nn.Module):
 class SoftEllipseMask(torch.nn.Module):
     """
     Apply a soft elliptical mask to a (C,H,W) tensor in [0,1].
-    Keeps inside ellipse, suppresses outside ellipse.
+    Keeps inside ellipse, sets outside to black (or configured fill).
     """
-    def __init__(self, cfg: FaceFocusConfig, train: bool):
+
+    def __init__(self, cfg: FaceMaskConfig, train: bool):
         super().__init__()
         self.cfg = cfg
         self.train = train
@@ -83,19 +76,19 @@ class SoftEllipseMask(torch.nn.Module):
         device = x.device
         cfg = self.cfg
 
-        # sample jitter
+        # Jitter (train only)
         cx, cy = cfg.center
         ax, ay = cfg.axes
 
         if self.train:
-            if cfg.jitter_center > 0:
+            if cfg.jitter_center != 0.0:
                 cx = cx + (2 * torch.rand((), device=device) - 1).item() * cfg.jitter_center
                 cy = cy + (2 * torch.rand((), device=device) - 1).item() * cfg.jitter_center
-            if cfg.jitter_axes > 0:
+            if cfg.jitter_axes != 0.0:
                 ax = ax * (1.0 + (2 * torch.rand((), device=device) - 1).item() * cfg.jitter_axes)
                 ay = ay * (1.0 + (2 * torch.rand((), device=device) - 1).item() * cfg.jitter_axes)
 
-        # coordinate grid in [-1,1]
+        # Coordinate grid in [-1,1]
         yy = torch.linspace(-1.0, 1.0, h, device=device).view(h, 1).expand(h, w)
         xx = torch.linspace(-1.0, 1.0, w, device=device).view(1, w).expand(h, w)
 
@@ -106,42 +99,52 @@ class SoftEllipseMask(torch.nn.Module):
         sigma = max(cfg.edge_softness, 1e-6)
         mask = torch.exp(-torch.clamp(r - 1.0, min=0.0) / sigma)  # (H,W) in (0,1]
 
-        # Make outside fall off faster (reduces background leakage)
-        mp = float(getattr(cfg, "mask_power", 1.0))
-        if mp != 1.0:
-            mask = mask.pow(mp)
+        # Make outside fall off faster
+        if cfg.mask_power != 1.0:
+            mask = mask.pow(float(cfg.mask_power))
 
         mask = mask.unsqueeze(0).expand(c, h, w)
 
-        if cfg.randomize_background and self.train:
-            noise = torch.randn_like(x) * cfg.background_noise_std
-            bg = torch.clamp(cfg.background_fill + noise, 0.0, 1.0)
+        # Outside fill (black by config)
+        if cfg.randomize_outside and self.train:
+            noise = torch.randn_like(x) * float(cfg.outside_noise_std)
+            bg = torch.clamp(float(cfg.outside_fill) + noise, 0.0, 1.0)
         else:
-            bg = torch.full_like(x, cfg.background_fill)
+            bg = torch.full_like(x, float(cfg.outside_fill))
 
         out = x * mask + bg * (1.0 - mask)
         return out
 
 
-def build_focus_face_transform(
+def build_face_mask_transform(
     train: bool,
-    cfg: FaceFocusConfig,
+    cfg: FaceMaskConfig,
     normalize_mean: float,
     normalize_std: float,
 ) -> transforms.Compose:
+    """
+    If cfg.enabled = False:
+      Grayscale -> Resize -> ToTensor -> Normalize
+
+    If cfg.enabled = True:
+      CenterCrop -> Grayscale -> Resize -> ToTensor -> EllipseMask -> Normalize
+    """
 
     ops = []
 
-    # NEW: background removal (PIL domain)
-    ops.append(BackgroundRemover())
+    if cfg.enabled:
+        ops.append(CenterCropMinSide(ratio=cfg.pre_crop_ratio))
 
     ops.extend([
-        CenterCropMinSide(ratio=getattr(cfg, "pre_crop_ratio", 1.0)),
         transforms.Grayscale(num_output_channels=1),
         transforms.Resize((cfg.size, cfg.size)),
         transforms.ToTensor(),
-        SoftEllipseMask(cfg=cfg, train=train),
-        transforms.Normalize(mean=[normalize_mean], std=[normalize_std]),
     ])
 
+    if cfg.enabled:
+        ops.append(SoftEllipseMask(cfg=cfg, train=train))
+
+    ops.append(transforms.Normalize(mean=[normalize_mean], std=[normalize_std]))
+
     return transforms.Compose(ops)
+
