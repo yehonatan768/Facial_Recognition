@@ -21,6 +21,7 @@ class RembgConfig:
     # NEW: safety fallback
     min_fg_fraction: float          # e.g. 0.02 (2%)
     fg_black_threshold: int         # e.g. 12 (0..255)
+    min_gray_variance: float
 
 
 class BackgroundRemover:
@@ -59,14 +60,17 @@ class BackgroundRemover:
             out_rgb = out.convert("RGB")
 
         # ---- Safety check: did we delete almost everything? ----
-        arr = np.asarray(out_rgb, dtype=np.uint8)  # (H,W,3)
-        # Foreground = pixels that are not near-black
-        thr = int(self.cfg.fg_black_threshold)
-        fg = (arr[..., 0] > thr) | (arr[..., 1] > thr) | (arr[..., 2] > thr)
-        fg_frac = float(fg.mean())
+        arr = np.asarray(out_rgb, dtype=np.uint8)
 
-        if fg_frac < float(self.cfg.min_fg_fraction):
-            # Fallback: return original input (do not lose the face)
+        thr = int(self.cfg.fg_black_threshold)
+        non_black = (arr[..., 0] > thr) | (arr[..., 1] > thr) | (arr[..., 2] > thr)
+        fg_frac = float(non_black.mean())
+
+        # variance check (captures cases that are dark but not exactly black)
+        gray = (0.299 * arr[..., 0] + 0.587 * arr[..., 1] + 0.114 * arr[..., 2]).astype(np.float32)
+        var = float(gray.var())
+
+        if fg_frac < float(self.cfg.min_fg_fraction) or var < float(self.cfg.min_gray_variance):
             return inp
 
         return out_rgb

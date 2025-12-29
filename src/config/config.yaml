@@ -78,6 +78,7 @@ advanced:
 
     min_fg_fraction: 0.02
     fg_black_threshold: 12
+    min_gray_variance: 5.0
 
 data:
   image_ext: ".jpg"

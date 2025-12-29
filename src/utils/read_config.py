@@ -102,7 +102,7 @@ def read_model_config(path: str | Path, write_back: bool = True) -> Dict[str, An
     updated |= _deep_set(cfg, "advanced.background_remover.alpha_matting_erode_size", 10)
     updated |= _deep_set(cfg, "advanced.background_remover.min_fg_fraction", 0.02)
     updated |= _deep_set(cfg, "advanced.background_remover.fg_black_threshold", 12)
-
+    updated |= _deep_set(cfg, "advanced.background_remover.min_gray_variance", 5.0)
     if write_back and updated:
         _write_yaml(p, cfg)
 
