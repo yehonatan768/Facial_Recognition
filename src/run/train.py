@@ -103,14 +103,16 @@ def _save_ckpt(
     model: torch.nn.Module,
     optim: torch.optim.Optimizer,
     epoch: int,
-    best: float,
+    best_monitor_score: float,
+    best_val_acc: float,
     cfg: Dict[str, Any],
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
         {
             "epoch": int(epoch),
-            "best_score": float(best),
+            "best_monitor_score": float(best_monitor_score),
+            "best_val_acc": float(best_val_acc),
             "model_state": model.state_dict(),
             "optim_state": optim.state_dict(),
             "cfg": cfg,
@@ -228,15 +230,21 @@ def main() -> None:
     monitor = str(es_cfg.get("monitor", "val_acc"))
     mode = str(es_cfg.get("mode", "max"))
     maximize = mode.lower() == "max"
-    best_score = -float("inf") if maximize else float("inf")
+    best_monitor_score = -float("inf") if maximize else float("inf")
+    best_val_acc = -float("inf")  # ALWAYS maximize accuracy for best checkpoint
 
     if args.resume:
         ckpt = torch.load(args.resume, map_location="cpu")
         model.load_state_dict(ckpt["model_state"], strict=True)
         optimizer.load_state_dict(ckpt["optim_state"])
         start_epoch = int(ckpt.get("epoch", 0)) + 1
-        best_score = float(ckpt.get("best_score", best_score))
-        logger.info(f"Resumed from {args.resume} (start_epoch={start_epoch}, best_score={best_score:.6f})")
+        best_monitor_score = float(ckpt.get("best_monitor_score", best_monitor_score))
+        best_val_acc = float(ckpt.get("best_val_acc", best_val_acc))
+
+        logger.info(
+            f"Resumed from {args.resume} (start_epoch={start_epoch}, "
+            f"best_monitor_score={best_monitor_score:.6f}, best_val_acc={best_val_acc:.6f})"
+        )
 
     es_enabled = bool(es_cfg.get("enabled", True))
     patience = int(es_cfg.get("patience", 20))
@@ -279,7 +287,11 @@ def main() -> None:
         lr = float(sched_info.get("lr", optimizer.param_groups[0].get("lr", 0.0)))
         mom = float(sched_info.get("momentum", optimizer.param_groups[0].get("momentum", 0.0)))
 
-        score = _get_monitor_score(monitor, val_loss=float(va_stats.loss), val_acc=float(va_stats.acc))
+        monitor_score = _get_monitor_score(
+            monitor,
+            val_loss=float(va_stats.loss),
+            val_acc=float(va_stats.acc),
+        )
 
         logger.info(
             f"Epoch {epoch:03d}/{epochs:03d} | "
@@ -301,19 +313,28 @@ def main() -> None:
         with metrics_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(row) + "\n")
 
-        _save_ckpt(ckpt_last, model, optimizer, epoch, best_score, cfg)
+        # Always save last
+        _save_ckpt(ckpt_last, model, optimizer, epoch, best_monitor_score, best_val_acc, cfg)
 
-        improved = (score > best_score) if maximize else (score < best_score)
-        if improved:
-            best_score = score
-            _save_ckpt(ckpt_best, model, optimizer, epoch, best_score, cfg)
+        # Save BEST checkpoint by val_acc only
+        cur_val_acc = float(va_stats.acc)
+        if cur_val_acc > best_val_acc:
+            best_val_acc = cur_val_acc
+            _save_ckpt(ckpt_best, model, optimizer, epoch, best_monitor_score, best_val_acc, cfg)
 
-        if es_enabled and early.update(epoch=epoch, score=score).should_stop:
-            logger.info(f"Early stop at epoch {epoch} (best_score={best_score:.6f})")
+        # Update best_monitor_score for logging (early stop uses monitor_score)
+        improved_monitor = (monitor_score > best_monitor_score) if maximize else (monitor_score < best_monitor_score)
+        if improved_monitor:
+            best_monitor_score = monitor_score
+
+        if es_enabled and early.update(epoch=epoch, score=monitor_score).should_stop:
+            logger.info(
+                f"Early stop at epoch {epoch} "
+                f"(best_monitor_score={best_monitor_score:.6f}, best_val_acc={best_val_acc:.6f})"
+            )
             break
 
-    logger.info(f"Training complete. Best checkpoint: {ckpt_best}")
-
+        logger.info(f"Training complete. Best checkpoint (by val_acc): {ckpt_best}")
 
 if __name__ == "__main__":
     main()
