@@ -8,6 +8,18 @@ paths:
   pairs_test: assets/pairsDevTest.txt
 
 # =========================
+# Optimization
+# =========================
+optim:
+  lr_base: 0.01
+  lr_decay: 0.995
+  momentum_start: 0.5
+  momentum_final: 0.9
+  momentum_ramp_epochs: 30
+
+
+
+# =========================
 # Data
 # =========================
 data:
@@ -64,9 +76,9 @@ train:
 # Split strategy
 # =========================
 split:
-  val_ratio: 0.15
+  val_ratio: 0.25
   target_pos_frac: 0.50
-  min_val_identities: 10
+  min_val_identities: 50
   seed: 42
 
 # =========================
@@ -82,7 +94,8 @@ model:
 # =========================
 early_stop:
   enabled: true
-  monitor: val_acc          # val_acc | val_loss
-  mode: max                 # max for acc, min for loss
+  monitor: val_loss          # val_acc | val_loss
+  mode: min                 # max for acc, min for loss
   patience: 20
   min_delta: 0.0
+
