@@ -25,7 +25,8 @@ from src.training.early_stop import EarlyStopping
 
 # Helps fragmentation in some CUDA environments (safe to keep)
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-
+os.environ["ORT_LOGGING_LEVEL"] = "4"  # 0=verbose ... 4=fatal
+os.environ["ORT_LOG_SEVERITY_LEVEL"] = "4"
 
 def _require(cfg: Dict[str, Any], path: str) -> Any:
     cur: Any = cfg
