@@ -143,3 +143,39 @@ class EdgeEmphasis(torch.nn.Module):
 
         # Return RGB for compatibility with face_mask (if used before grayscale)
         return out.convert("RGB")
+
+from typing import Any, Dict
+
+def _get(d: Dict[str, Any], key: str, default: Any) -> Any:
+    return d[key] if key in d else default
+
+
+def build_equalize_from_cfg(cfg: Dict[str, Any]):
+    # expects you already have ContrastEqualize + EqualizeConfig defined above
+    f = cfg.get("filters", {})
+    e = f.get("equalize", {})
+
+    c = EqualizeConfig(
+        enabled=bool(_get(e, "enabled", False)),
+        method=str(_get(e, "method", "autocontrast")),
+        autocontrast_cutoff=float(_get(e, "autocontrast_cutoff", 0.0)),
+        autocontrast_ignore=_get(e, "autocontrast_ignore", None),
+        clahe_clip_limit=float(_get(e, "clahe_clip_limit", 2.0)),
+        clahe_tile_grid_size=int(_get(e, "clahe_tile_grid_size", 8)),
+    )
+    return ContrastEqualize(c)
+
+
+def build_edge_from_cfg(cfg: Dict[str, Any]):
+    # expects you already have EdgeEmphasis + EdgeConfig defined above
+    f = cfg.get("filters", {})
+    e = f.get("edge", {})
+
+    c = EdgeConfig(
+        enabled=bool(_get(e, "enabled", False)),
+        method=str(_get(e, "method", "find_edges")),
+        mode=str(_get(e, "mode", "mix")),
+        alpha=float(_get(e, "alpha", 0.35)),
+        blur_radius=float(_get(e, "blur_radius", 0.0)),
+    )
+    return EdgeEmphasis(c)
