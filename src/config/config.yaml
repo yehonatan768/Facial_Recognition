@@ -1,16 +1,36 @@
+# =========================
+# Paths
+# =========================
 paths:
-  project_root: ""
+  project_root: ""            # auto-resolved by read_config.py
   images_root: images
   pairs_train: assets/pairsDevTrain.txt
   pairs_test: assets/pairsDevTest.txt
 
+# =========================
+# Data
+# =========================
 data:
   image_ext: .jpg
   strict_exists: true
 
+# =========================
+# Pipeline
+# =========================
 pipeline:
-  mode: advanced
+  mode: advanced              # paper | advanced
 
+# =========================
+# Transform (shared)
+# =========================
+transform:
+  input_size: 105
+  mean: 0.5
+  std: 0.5
+
+# =========================
+# Advanced pipeline (FACE MASK)
+# =========================
 advanced:
   pre_crop_ratio: 0.90
 
@@ -20,7 +40,9 @@ advanced:
     edge_softness: 0.08
     power: 1.5
 
-
+# =========================
+# Paper pipeline (if used)
+# =========================
 paper:
   enable_jitter: true
   jitter:
@@ -28,3 +50,39 @@ paper:
     contrast: 0.3
     saturation: 0.3
     hue: 0.02
+
+# =========================
+# Training
+# =========================
+train:
+  seed: 42
+  epochs: 200
+  batch_size: 32
+  dump_every: 10
+
+# =========================
+# Split strategy
+# =========================
+split:
+  val_ratio: 0.15
+  target_pos_frac: 0.50
+  min_val_identities: 10
+  seed: 42
+
+# =========================
+# Model
+# =========================
+model:
+  in_channels: 1
+  enforce_105: true
+  embedding_dim: 4096
+
+# =========================
+# Early stopping
+# =========================
+early_stop:
+  enabled: true
+  monitor: val_acc          # val_acc | val_loss
+  mode: max                 # max for acc, min for loss
+  patience: 20
+  min_delta: 0.0
