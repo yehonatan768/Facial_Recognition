@@ -41,15 +41,16 @@ paper:
     saturation: 0.3
     hue: 0.02
 advanced:
-  pre_crop_ratio: 0.9
+  pre_crop_ratio: 0.90
   background_remover:
     enabled: true
-    backend: mediapipe_selfie
-    model_selection: 1
-    threshold: 0.15
+    backend: "torchvision_deeplabv3"
+    device: "cpu"
+    threshold: 0.35
     min_fg_fraction: 0.02
     fg_black_threshold: 12
     min_gray_variance: 5.0
+
 data:
   image_ext: .jpg
   strict_exists: true
