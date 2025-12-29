@@ -1,4 +1,3 @@
-# src/training/loop.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -25,40 +24,35 @@ class EpochStats:
 def _batch_accuracy(p: torch.Tensor, y: torch.Tensor, thr: float = 0.5) -> float:
     """
     p: (B,1) or (B,) probabilities in [0,1]
-    y: (B,) labels in {0,1}
+    y: (B,1) or (B,) labels in {0,1}
     """
-    if p.dim() == 2 and p.size(1) == 1:
-        p = p[:, 0]
-    pred = (p >= thr).to(dtype=torch.float32)
-    return float((pred == y).float().mean().item())
+    p = p.view(-1)
+    y = y.view(-1)
+    pred = (p >= thr).to(dtype=torch.long)
+    tgt = (y >= 0.5).to(dtype=torch.long)
+    return float((pred == tgt).float().mean().item())
 
 
-def _unpack_batch(
-    batch: BatchType,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[List[str]], Optional[List[str]]]:
+def _unpack_batch(batch: BatchType) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Any, Any]:
     """
-    Supports BOTH batch formats:
-      A) tuple: (x1, x2, y)
-      B) dict: {"x1":..., "x2":..., "y":..., "path1":..., "path2":...}
+    Supports:
+      - tuple: (x1, x2, y)
+      - dict: {"x1":..., "x2":..., "y":..., ...}
+    Returns: x1, x2, y, meta1, meta2 (meta values may be None).
+    """
+    if isinstance(batch, (tuple, list)):
+        if len(batch) != 3:
+            raise ValueError(f"Expected (x1,x2,y) batch tuple, got len={len(batch)}")
+        x1, x2, y = batch
+        return x1, x2, y, None, None
 
-    Returns: (x1, x2, y, path1_list_or_None, path2_list_or_None)
-    """
     if isinstance(batch, dict):
         x1 = batch["x1"]
         x2 = batch["x2"]
         y = batch["y"]
-        p1 = batch.get("path1", None)
-        p2 = batch.get("path2", None)
+        return x1, x2, y, None, None
 
-        if p1 is not None and not isinstance(p1, list):
-            p1 = list(p1)
-        if p2 is not None and not isinstance(p2, list):
-            p2 = list(p2)
-
-        return x1, x2, y, p1, p2
-
-    x1, x2, y = batch
-    return x1, x2, y, None, None
+    raise TypeError(f"Unsupported batch type: {type(batch)}")
 
 
 def train_one_epoch(
@@ -95,7 +89,9 @@ def train_one_epoch(
 
         x1 = x1.to(device, non_blocking=True)
         x2 = x2.to(device, non_blocking=True)
-        y = y.to(device, non_blocking=True)
+
+        # FIX: BCE expects float targets (and it matches val codepath behavior)
+        y = y.to(device, non_blocking=True).float()
 
         p_same, _, _ = model(x1, x2)
         p_same = p_same.view(-1).clamp(1e-6, 1.0 - 1e-6)
@@ -126,19 +122,15 @@ def run_val_and_dump(
     model: torch.nn.Module,
     loader: DataLoader,
     device: torch.device,
-    epoch: int,
-    workdir: str | Path,
-    dump: bool = True,
-    thr: float = 0.5,
-) -> Tuple[EpochStats, Optional[Path]]:
+    dump_path: Optional[Path] = None,
+) -> EpochStats:
     """
-    Validation epoch + optional per-sample dump for error analysis.
+    Validation pass.
 
-    Writes (when dump=True):
-      workdir/val_predictions/val_epoch_{epoch:03d}.csv
-
-    This avoids overwriting the same file each epoch (Windows IO stalls)
-    and enables per-epoch error analysis.
+    Computes:
+      - mean BCE loss (per sample)
+      - accuracy at threshold 0.5
+    Optionally dumps per-pair predictions to CSV for inspection.
     """
     model.eval()
 
@@ -147,83 +139,6 @@ def run_val_and_dump(
     total_n = 0
 
     rows: List[Dict[str, Any]] = []
-
-    for batch in loader:
-        x1, x2, y, p1, p2 = _unpack_batch(batch)
-
-        x1 = x1.to(device, non_blocking=True)
-        x2 = x2.to(device, non_blocking=True)
-        y = y.to(device, non_blocking=True).float().view(-1)
-
-        p_same, _, _ = model(x1, x2)
-        p_same = p_same.view(-1).clamp(1e-6, 1.0 - 1e-6)
-
-        loss_per = F.binary_cross_entropy(p_same, y, reduction="none")  # [B]
-        b = int(y.numel())
-
-        total_loss_sum += float(loss_per.sum().item())
-        total_acc_sum += _batch_accuracy(p_same, y, thr=thr) * b
-        total_n += b
-
-        if dump:
-            ps = p_same.detach().cpu().numpy()
-            ys = y.detach().cpu().numpy()
-            ls = loss_per.detach().cpu().numpy()
-
-            for i in range(b):
-                rows.append(
-                    {
-                        "epoch": int(epoch),
-                        "y_true": int(ys[i]),
-                        "p_same": float(ps[i]),
-                        "loss": float(ls[i]),
-                        "path1": str(p1[i]) if p1 is not None else None,
-                        "path2": str(p2[i]) if p2 is not None else None,
-                    }
-                )
-
-    stats = EpochStats(
-        loss=total_loss_sum / max(1, total_n),
-        acc=total_acc_sum / max(1, total_n),
-        n=total_n,
-    )
-
-    out_path: Optional[Path] = None
-    if dump:
-        workdir = Path(workdir)
-        out_dir = workdir / "val_predictions"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / f"val_epoch_{epoch:03d}.csv"
-        pd.DataFrame(rows).to_csv(out_path, index=False)
-
-    return stats, out_path
-
-
-@torch.no_grad()
-def eval_one_epoch(
-    model: torch.nn.Module,
-    loader: DataLoader,
-    device: torch.device,
-    loss_fn: Optional[nn.Module] = None,
-    thr: float = 0.5,
-) -> Tuple[EpochStats, torch.Tensor, torch.Tensor]:
-    """
-    Evaluate on pairs:
-      returns (stats, probs, labels)
-
-    probs:  (N,) float tensor on CPU
-    labels: (N,) float tensor on CPU
-    """
-    model.eval()
-    if loss_fn is None:
-        loss_fn = nn.BCELoss(reduction="mean")
-
-    probs_all: List[torch.Tensor] = []
-    y_all: List[torch.Tensor] = []
-
-    total_loss = 0.0
-    total_acc = 0.0
-    total_n = 0
 
     for batch in loader:
         x1, x2, y, _, _ = _unpack_batch(batch)
@@ -235,22 +150,32 @@ def eval_one_epoch(
         p_same, _, _ = model(x1, x2)
         p_same = p_same.view(-1).clamp(1e-6, 1.0 - 1e-6)
 
-        loss = loss_fn(p_same, y)
+        # per-sample loss
+        losses = F.binary_cross_entropy(p_same, y, reduction="none")
+        loss_sum = losses.sum()
 
         b = int(y.numel())
-        total_loss += float(loss.item()) * b
-        total_acc += _batch_accuracy(p_same, y, thr=thr) * b
+        total_loss_sum += float(loss_sum.item())
+        total_acc_sum += _batch_accuracy(p_same, y) * b
         total_n += b
 
-        probs_all.append(p_same.detach().cpu())
-        y_all.append(y.detach().cpu())
+        if dump_path is not None:
+            # Dump simple per-sample stats (extend if you have paths/ids in batch dict)
+            for i in range(b):
+                rows.append(
+                    {
+                        "p_same": float(p_same[i].item()),
+                        "y": float(y[i].item()),
+                        "loss": float(losses[i].item()),
+                    }
+                )
 
-    probs = torch.cat(probs_all, dim=0) if probs_all else torch.empty(0)
-    labels = torch.cat(y_all, dim=0) if y_all else torch.empty(0)
+    if dump_path is not None:
+        dump_path.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(rows).to_csv(dump_path, index=False)
 
-    stats = EpochStats(
-        loss=total_loss / max(1, total_n),
-        acc=total_acc / max(1, total_n),
+    return EpochStats(
+        loss=total_loss_sum / max(1, total_n),
+        acc=total_acc_sum / max(1, total_n),
         n=total_n,
     )
-    return stats, probs, labels
