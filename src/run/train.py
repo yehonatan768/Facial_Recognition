@@ -29,6 +29,7 @@ os.environ["ORT_LOGGING_LEVEL"] = "4"  # 0=verbose ... 4=fatal
 os.environ["ORT_LOG_SEVERITY_LEVEL"] = "4"
 os.environ["OPENCV_LOG_LEVEL"] = "SILENT"
 
+
 def _require(cfg: Dict[str, Any], path: str) -> Any:
     cur: Any = cfg
     for k in path.split("."):
@@ -80,8 +81,6 @@ def _get_device(device_str: str) -> torch.device:
 
 
 def _resolve_paths(cfg: Dict[str, Any], args) -> Dict[str, Path]:
-    # Optional CLI overrides can stay if you want, but no implicit defaults.
-    # If you want *only* config.yaml and no overrides at all, remove args usage here.
     images_root_s = args.images_root or _require_str(cfg, "paths.images_root")
     pairs_train_s = args.pairs_train or _require_str(cfg, "paths.pairs_train")
     pairs_test_s = args.pairs_test or _require_str(cfg, "paths.pairs_test")
@@ -131,6 +130,18 @@ def _get_monitor_score(monitor: str, val_loss: float, val_acc: float) -> float:
     raise ValueError(f"Unsupported early_stop.monitor={monitor!r}. Use 'val_loss' or 'val_acc'.")
 
 
+def _write_metrics_json(path: Path, payload: Dict[str, Any]) -> None:
+    """
+    Writes metrics in the exact structure expected by your plotting cell.
+    Atomic write to reduce risk of partial files.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+    tmp.replace(path)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", type=str, default="", help="Optional. If omitted, uses src/config/config.yaml")
@@ -162,10 +173,20 @@ def main() -> None:
     seed = int(_require(cfg, "train.seed"))
     _seed_everything(seed)
 
-    metrics_path = workdir / "metrics.jsonl"
+    # ---- metrics.json (NOT jsonl) ----
+    metrics_path = workdir / "metrics.json"
     if not args.resume and metrics_path.exists():
         metrics_path.unlink()
         logger.info(f"Cleared previous metrics file: {metrics_path}")
+
+    # In-memory metrics (append each epoch and rewrite metrics.json)
+    metrics: Dict[str, list] = {
+        "epoch": [],
+        "train_loss": [],
+        "val_loss": [],
+        "train_acc": [],
+        "val_acc": [],
+    }
 
     paths = _resolve_paths(cfg, args)
     images_root = paths["images_root"]
@@ -227,6 +248,11 @@ def main() -> None:
 
     best_monitor_score = -float("inf") if maximize else float("inf")
     best_val_acc = -float("inf")
+    best_epoch = -1
+
+    ckpt_dir = workdir / "checkpoints"
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    ckpt_best = ckpt_dir / "best.pt"
 
     if args.resume:
         ckpt = torch.load(args.resume, map_location="cpu")
@@ -235,8 +261,11 @@ def main() -> None:
         start_epoch = int(ckpt.get("epoch", 0)) + 1
         best_monitor_score = float(ckpt.get("best_monitor_score", best_monitor_score))
         best_val_acc = float(ckpt.get("best_val_acc", best_val_acc))
-
+        best_epoch = int(ckpt.get("epoch", best_epoch))
         logger.info(f"Resumed from {args.resume} (epoch {start_epoch})")
+
+        # NOTE: We intentionally do not attempt to backfill metrics.json on resume.
+        # If you want resume+continue metrics arrays, tell me and I’ll add it cleanly.
 
     early = EarlyStopping(
         patience=int(es_cfg.get("patience", 20)),
@@ -246,11 +275,6 @@ def main() -> None:
 
     epochs = int(_require(cfg, "train.epochs"))
     dump_every = int(_require(cfg, "train.dump_every"))
-
-    ckpt_dir = workdir / "checkpoints"
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
-    ckpt_best = ckpt_dir / "best.pt"
-    ckpt_last = ckpt_dir / "last.pt"
 
     logger.info(
         f"Train={len(train_pairs)} | Val={len(val_pairs)} | Test={len(test_pairs) if test_pairs else 0} | "
@@ -268,8 +292,7 @@ def main() -> None:
         tr_stats = train_one_epoch(model=model, loader=train_loader, device=device, optimizer=optimizer)
 
         do_dump = (epoch == start_epoch) or (dump_every > 0 and epoch % dump_every == 0)
-
-        va_stats, dump_path = run_val_and_dump(
+        va_stats, _dump_path = run_val_and_dump(
             model=model,
             loader=val_loader,
             device=device,
@@ -283,6 +306,7 @@ def main() -> None:
 
         monitor_score = _get_monitor_score(monitor, va_stats.loss, va_stats.acc)
 
+        # Per-epoch log (kept), but NO "new best" printing.
         logger.info(
             f"Epoch {epoch:03d}/{epochs:03d} | "
             f"train_loss={tr_stats.loss:.6f} val_loss={va_stats.loss:.6f} | "
@@ -290,39 +314,35 @@ def main() -> None:
             f"lr={lr:.8f} momentum={mom:.3f}"
         )
 
-        # Save last
-        _save_ckpt(ckpt_last, model, optimizer, epoch, best_monitor_score, best_val_acc, cfg)
-
-        # Save best by val_acc
+        # ---- Save best only (by val_acc, as requested) ----
         if va_stats.acc > best_val_acc:
             best_val_acc = float(va_stats.acc)
+            best_epoch = int(epoch)
             _save_ckpt(ckpt_best, model, optimizer, epoch, best_monitor_score, best_val_acc, cfg)
-            logger.info(f"[New best] epoch={epoch} | val_acc={best_val_acc:.4f}")
 
-        # Update monitor score
+        # ---- Update monitor score for early stopping ----
         improved = (monitor_score > best_monitor_score) if maximize else (monitor_score < best_monitor_score)
         if improved:
-            best_monitor_score = monitor_score
+            best_monitor_score = float(monitor_score)
 
-        # Periodic checkpoint status
-        if epoch % 10 == 0 or epoch == epochs:
-            logger.info(
-                f"[Checkpoint status] epoch={epoch} | best_val_acc={best_val_acc:.4f} | best_ckpt={ckpt_best}"
-            )
+        # ---- Write metrics.json for plotting ----
+        metrics["epoch"].append(int(epoch))
+        metrics["train_loss"].append(float(tr_stats.loss))
+        metrics["val_loss"].append(float(va_stats.loss))
+        metrics["train_acc"].append(float(tr_stats.acc))
+        metrics["val_acc"].append(float(va_stats.acc))
+        _write_metrics_json(metrics_path, metrics)
 
         if early.update(epoch=epoch, score=monitor_score).should_stop:
-            logger.info(
-                f"Early stopping at epoch {epoch} | "
-                f"best_val_acc={best_val_acc:.4f}"
-            )
             break
 
     # =========================
-    # Final summary
+    # Final summary (print once)
     # =========================
     logger.info("Training finished.")
+    logger.info(f"Best model: epoch={best_epoch} | val_acc={best_val_acc:.4f}")
     logger.info(f"Best checkpoint: {ckpt_best}")
-    logger.info(f"Best validation accuracy: {best_val_acc:.4f}")
+    logger.info(f"Metrics saved to: {metrics_path}")
 
 
 if __name__ == "__main__":
