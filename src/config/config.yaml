@@ -11,9 +11,9 @@ paths:
 # Optimization
 # =========================
 optim:
-  lr: 0.01
+  lr: 0.001
   lr_decay: 0.99
-  momentum_start: 0.5
+  momentum_start: 0.3
   momentum_final: 0.9
   momentum_ramp_epochs: 40
 
@@ -105,16 +105,16 @@ augment:
 
   rotation:
     enabled: true
-    degrees: 3.0        # use 3.0–5.0 for “light rotation”
+    degrees: 4.0        # use 3.0–5.0 for “light rotation”
 
   blur:
-    enabled: false
+    enabled: true
     p: 0.15
     kernel_size: 3
     sigma: [0.3, 1.0]   # min/max sigma
 
   random_erasing:
-    enabled: false
+    enabled: true
     p: 0.10
     scale: [0.02, 0.08]
     ratio: [0.3, 3.3]
