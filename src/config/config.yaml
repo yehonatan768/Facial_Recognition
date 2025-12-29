@@ -76,6 +76,9 @@ advanced:
     alpha_matting_background_threshold: 10
     alpha_matting_erode_size: 10
 
+    min_fg_fraction: 0.02
+    fg_black_threshold: 12
+
 data:
   image_ext: ".jpg"
   strict_exists: true

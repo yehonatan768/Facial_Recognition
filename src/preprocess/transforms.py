@@ -27,6 +27,7 @@ def build_transform_from_config(cfg: Dict[str, Any], train: bool) -> transforms.
       CenterCropMinSide -> rembg -> Grayscale -> Resize -> ToTensor -> Normalize
 
     NOTE: Advanced currently does background removal only (no face mask).
+          BackgroundRemover has a safety fallback if rembg removes almost everything.
     """
     mode = str(_require(cfg, "pipeline.mode")).strip().lower()
 
@@ -46,6 +47,7 @@ def build_transform_from_config(cfg: Dict[str, Any], train: bool) -> transforms.
 
     # rembg config
     bg_enabled = bool(_require(cfg, "advanced.background_remover.enabled"))
+
     bg_cfg = RembgConfig(
         enabled=bg_enabled,
         model=str(_require(cfg, "advanced.background_remover.model")),
@@ -59,7 +61,11 @@ def build_transform_from_config(cfg: Dict[str, Any], train: bool) -> transforms.
         alpha_matting_erode_size=int(
             _require(cfg, "advanced.background_remover.alpha_matting_erode_size")
         ),
+        # NEW (fail-safe): if rembg removes almost everything, fallback to original crop
+        min_fg_fraction=float(_require(cfg, "advanced.background_remover.min_fg_fraction")),
+        fg_black_threshold=int(_require(cfg, "advanced.background_remover.fg_black_threshold")),
     )
+
     remover = BackgroundRemover(bg_cfg)
 
     # After rembg: format for model
