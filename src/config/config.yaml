@@ -93,8 +93,8 @@ model:
 # =========================
 early_stop:
   enabled: true
-  monitor: val_loss          # val_acc | val_loss
-  mode: min                 # max for acc, min for loss
+  monitor: val_acc          # val_acc | val_loss
+  mode: max                 # max for acc, min for loss
   patience: 20
   min_delta: 0.0
 
