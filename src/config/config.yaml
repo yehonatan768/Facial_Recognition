@@ -105,10 +105,10 @@ augment:
 
   rotation:
     enabled: true
-    degrees: 5.0        # use 3.0–5.0 for “light rotation”
+    degrees: 3.0        # use 3.0–5.0 for “light rotation”
 
   blur:
-    enabled: true
+    enabled: false
     p: 0.15
     kernel_size: 3
     sigma: [0.3, 1.0]   # min/max sigma
