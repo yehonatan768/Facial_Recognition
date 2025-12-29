@@ -40,25 +40,25 @@ class CNNEncoder(nn.Module):
         # valid conv => padding=0, stride=1
         self.conv1 = nn.Sequential(
             nn.Conv2d(in_channels, 64, kernel_size=10, stride=1, padding=0),
-            nn.LeakyReLU(inplace=True),
+            nn.LeakyReLU(negative_slope=0.01, inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
         )
 
         self.conv2 = nn.Sequential(
             nn.Conv2d(64, 128, kernel_size=7, stride=1, padding=0),
-            nn.LeakyReLU(inplace=True),
+            nn.LeakyReLU(negative_slope=0.01, inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
         )
 
         self.conv3 = nn.Sequential(
             nn.Conv2d(128, 128, kernel_size=4, stride=1, padding=0),
-            nn.LeakyReLU(inplace=True),
+            nn.LeakyReLU(negative_slope=0.01, inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
         )
 
         self.conv4 = nn.Sequential(
             nn.Conv2d(128, 256, kernel_size=4, stride=1, padding=0),
-            nn.LeakyReLU(inplace=True),
+            nn.LeakyReLU(negative_slope=0.01, inplace=True),
         )
 
         # Paper fixed input size 105x105 => 256x6x6 before FC
