@@ -98,3 +98,24 @@ early_stop:
   patience: 20
   min_delta: 0.0
 
+augment:
+  hflip:
+    enabled: true
+    p: 0.5
+
+  rotation:
+    enabled: true
+    degrees: 5.0        # use 3.0–5.0 for “light rotation”
+
+  blur:
+    enabled: true
+    p: 0.15
+    kernel_size: 3
+    sigma: [0.3, 1.0]   # min/max sigma
+
+  random_erasing:
+    enabled: false
+    p: 0.10
+    scale: [0.02, 0.08]
+    ratio: [0.3, 3.3]
+    value: 0.0
