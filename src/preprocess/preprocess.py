@@ -1,4 +1,3 @@
-# src/preprocess.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -9,6 +8,7 @@ from PIL import Image
 from torchvision import transforms
 from torchvision.transforms import functional as TF
 
+from src.preprocess.background_remove import BackgroundRemover
 
 @dataclass
 class FaceFocusConfig:
@@ -129,21 +129,19 @@ def build_focus_face_transform(
     normalize_mean: float,
     normalize_std: float,
 ) -> transforms.Compose:
-    """
-    Correct order:
-      CenterCrop (min-side, optional tighter) ->
-      Grayscale ->
-      Resize(cfg.size) ->
-      ToTensor ([0,1]) ->
-      Ellipse mask / background fill ->
-      Normalize
-    """
-    ops = [
+
+    ops = []
+
+    # NEW: background removal (PIL domain)
+    ops.append(BackgroundRemover())
+
+    ops.extend([
         CenterCropMinSide(ratio=getattr(cfg, "pre_crop_ratio", 1.0)),
         transforms.Grayscale(num_output_channels=1),
         transforms.Resize((cfg.size, cfg.size)),
         transforms.ToTensor(),
         SoftEllipseMask(cfg=cfg, train=train),
         transforms.Normalize(mean=[normalize_mean], std=[normalize_std]),
-    ]
+    ])
+
     return transforms.Compose(ops)

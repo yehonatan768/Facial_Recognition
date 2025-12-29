@@ -8,6 +8,9 @@ from torchvision import transforms
 from src.preprocess.preprocess import FaceFocusConfig, build_focus_face_transform
 from src.preprocess.paper_transforms import PaperImageTransform  # your existing class
 
+# NEW: background removal (PIL -> PIL)
+from src.preprocess.background_remove import BackgroundRemover
+
 
 def _get(cfg: Dict[str, Any], path: str, default: Any) -> Any:
     cur: Any = cfg
@@ -24,10 +27,10 @@ def build_transform_from_config(cfg: Dict[str, Any], train: bool) -> transforms.
 
     Behavior:
       - Default: paper transform (grayscale->resize->tensor->normalize, optional jitter)
-      - If data.face_focus.enabled: use focus-face pipeline (crop+mask) AND normalize same mean/std
-        (Optionally still allow paper jitter before ToTensor if you want it.)
+      - If data.face_focus.enabled: optionally remove background first (PIL),
+        then apply focus-face pipeline (crop+mask) and normalize with same mean/std.
     """
-    # Mean/std should match whatever you use for training (paper: 0.5/0.5)
+    # Mean/std should match training (paper: 0.5/0.5)
     mean = float(_get(cfg, "transform.mean", 0.5))
     std = float(_get(cfg, "transform.std", 0.5))
 
@@ -39,14 +42,15 @@ def build_transform_from_config(cfg: Dict[str, Any], train: bool) -> transforms.
 
     if not focus_enabled:
         # Use existing paper transform class
-        # Note: your PaperImageTransform currently uses its own defaults and config keys;
-        # keeping it simple here and using constructor directly.
         return PaperImageTransform(
             train=train,
             input_size=input_size,
             mean=mean,
             std=std,
         ).t
+
+    # NEW: toggle background removal (default True when face_focus is enabled)
+    remove_bg = bool(_get(cfg, "data.face_focus.remove_background", True))
 
     # Face focus config
     ff_cfg_dict = _get(cfg, "data.face_focus", {}) or {}
@@ -64,10 +68,19 @@ def build_transform_from_config(cfg: Dict[str, Any], train: bool) -> transforms.
         background_fill=float(ff_cfg_dict.get("background_fill", 0.5)),
     )
 
-    # Use your proven correct focus-face pipeline (includes grayscale/resize/tensor/mask/normalize)
-    return build_focus_face_transform(
+    # Build your proven focus-face pipeline (grayscale/resize/tensor/mask/normalize)
+    focus_t = build_focus_face_transform(
         train=train,
         cfg=ff_cfg,
         normalize_mean=mean,
         normalize_std=std,
     )
+
+    # NEW: ensure background removal happens BEFORE crop/grayscale/resize/etc.
+    if remove_bg:
+        return transforms.Compose([
+            BackgroundRemover(),
+            focus_t,
+        ])
+
+    return focus_t
