@@ -11,11 +11,11 @@ paths:
 # Optimization
 # =========================
 optim:
-  lr: 0.01
-  lr_decay: 0.995
+  lr: 0.003
+  lr_decay: 0.985
   momentum_start: 0.5
   momentum_final: 0.9
-  momentum_ramp_epochs: 200
+  momentum_ramp_epochs: 50
 
 
 # =========================
@@ -57,10 +57,10 @@ advanced:
 paper:
   enable_jitter: true
   jitter:
-    brightness: 0.3
-    contrast: 0.3
-    saturation: 0.3
-    hue: 0.02
+    brightness: 0.2
+    contrast: 0.2
+    saturation: 0.2
+    hue: 0.01
 
 # =========================
 # Training
