@@ -7,6 +7,9 @@ import yaml
 
 
 def _deep_set(d: Dict[str, Any], path: str, value: Any) -> bool:
+    """
+    Set d[path] = value if missing. Returns True if updated.
+    """
     cur = d
     keys = path.split(".")
     for k in keys[:-1]:
@@ -47,39 +50,44 @@ def read_model_config(path: str | Path, write_back: bool = True) -> Dict[str, An
     updated = False
     project_root = _find_project_root(p.parent)
 
+    # Paths
     updated |= _deep_set(cfg, "paths.project_root", str(project_root))
     updated |= _deep_set(cfg, "paths.images_root", "images")
     updated |= _deep_set(cfg, "paths.pairs_train", "assets/pairsDevTrain.txt")
     updated |= _deep_set(cfg, "paths.pairs_test", "assets/pairsDevTest.txt")
 
+    # Data
     updated |= _deep_set(cfg, "data.image_ext", ".jpg")
     updated |= _deep_set(cfg, "data.strict_exists", True)
 
+    # Transform
     updated |= _deep_set(cfg, "transform.input_size", 105)
     updated |= _deep_set(cfg, "transform.mean", 0.5)
     updated |= _deep_set(cfg, "transform.std", 0.5)
 
-    updated |= _deep_set(cfg, "pipeline.mode", "paper")
+    # Pipeline mode
+    updated |= _deep_set(cfg, "pipeline.mode", "paper")  # "paper" or "advanced"
 
-    # Paper
+    # Paper pipeline defaults (if used)
     updated |= _deep_set(cfg, "paper.enable_jitter", True)
     updated |= _deep_set(cfg, "paper.jitter.brightness", 0.3)
     updated |= _deep_set(cfg, "paper.jitter.contrast", 0.3)
     updated |= _deep_set(cfg, "paper.jitter.saturation", 0.3)
     updated |= _deep_set(cfg, "paper.jitter.hue", 0.02)
 
-    # Advanced (TorchVision DeepLabV3)
+    # Advanced pipeline (DeepLabV3)
     updated |= _deep_set(cfg, "advanced.pre_crop_ratio", 0.90)
+
     updated |= _deep_set(cfg, "advanced.background_remover.enabled", True)
     updated |= _deep_set(cfg, "advanced.background_remover.backend", "torchvision_deeplabv3")
 
-    # IMPORTANT: use CPU by default when used inside DataLoader workers
+    # IMPORTANT: CPU is safest with DataLoader workers
     updated |= _deep_set(cfg, "advanced.background_remover.device", "cpu")
 
-    # threshold on "person" probability
+    # Person probability threshold
     updated |= _deep_set(cfg, "advanced.background_remover.threshold", 0.35)
 
-    # fail-safe thresholds
+    # Fail-safe thresholds
     updated |= _deep_set(cfg, "advanced.background_remover.min_fg_fraction", 0.02)
     updated |= _deep_set(cfg, "advanced.background_remover.fg_black_threshold", 12)
     updated |= _deep_set(cfg, "advanced.background_remover.min_gray_variance", 5.0)

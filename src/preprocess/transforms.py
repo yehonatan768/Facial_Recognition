@@ -24,7 +24,7 @@ def build_transform_from_config(cfg: Dict[str, Any], train: bool) -> transforms.
       PaperImageTransform
 
     pipeline.mode = "advanced":
-      CenterCropMinSide -> DeepLabV3 person mask -> Grayscale -> Resize -> ToTensor -> Normalize
+      CenterCropMinSide -> DeepLabV3(person) -> Grayscale -> Resize -> ToTensor -> Normalize
 
     NOTE: Advanced currently does background removal only (no face mask).
     """
@@ -40,7 +40,7 @@ def build_transform_from_config(cfg: Dict[str, Any], train: bool) -> transforms.
     if mode != "advanced":
         raise ValueError(f"Invalid pipeline.mode='{mode}'. Expected 'paper' or 'advanced'.")
 
-    # Crop first (helps segmentation focus on the subject)
+    # Crop first (helps segmentation focus on the subject/face)
     pre_crop_ratio = float(_require(cfg, "advanced.pre_crop_ratio"))
     crop = CenterCropMinSide(ratio=pre_crop_ratio)
 

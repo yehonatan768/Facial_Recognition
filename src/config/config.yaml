@@ -1,38 +1,21 @@
 paths:
+  project_root: ""
   images_root: images
   pairs_train: assets/pairsDevTrain.txt
   pairs_test: assets/pairsDevTest.txt
-train:
-  epochs: 200
-  batch_size: 128
-  seed: 1337
-  dump_every: 10
-split:
-  val_ratio: 0.2
-  target_pos_frac: 0.5
-  min_val_identities: 50
-  seed: 1337
-optim:
-  lr: 0.01
-  lr_decay: 0.99
-  momentum_start: 0.5
-  momentum_final: 0.9
-  momentum_ramp_epochs: 100
-  weight_decay_conv: 0.0
-  weight_decay_fc: 0.0
-  weight_decay_alpha: 0.0
-early_stop:
-  enabled: true
-  monitor: val_loss
-  mode: min
-  patience: 20
-  min_delta: 0.0
+
+data:
+  image_ext: .jpg
+  strict_exists: true
+
 pipeline:
-  mode: advanced
+  mode: advanced   # paper | advanced
+
 transform:
   input_size: 105
   mean: 0.5
   std: 0.5
+
 paper:
   enable_jitter: true
   jitter:
@@ -40,22 +23,14 @@ paper:
     contrast: 0.3
     saturation: 0.3
     hue: 0.02
+
 advanced:
   pre_crop_ratio: 0.90
   background_remover:
     enabled: true
-    backend: "torchvision_deeplabv3"
-    device: "cpu"
+    backend: torchvision_deeplabv3
+    device: cpu
     threshold: 0.35
     min_fg_fraction: 0.02
     fg_black_threshold: 12
     min_gray_variance: 5.0
-
-data:
-  image_ext: .jpg
-  strict_exists: true
-model:
-  in_channels: 1
-  enforce_105: true
-  embedding_dim: 4096
-runtime: {}
