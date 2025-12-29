@@ -173,13 +173,12 @@ def main() -> None:
     seed = int(_require(cfg, "train.seed"))
     _seed_everything(seed)
 
-    # ---- metrics.json (NOT jsonl) ----
+    # ---- metrics.json ----
     metrics_path = workdir / "metrics.json"
     if not args.resume and metrics_path.exists():
         metrics_path.unlink()
         logger.info(f"Cleared previous metrics file: {metrics_path}")
 
-    # In-memory metrics (append each epoch and rewrite metrics.json)
     metrics: Dict[str, list] = {
         "epoch": [],
         "train_loss": [],
@@ -264,9 +263,6 @@ def main() -> None:
         best_epoch = int(ckpt.get("epoch", best_epoch))
         logger.info(f"Resumed from {args.resume} (epoch {start_epoch})")
 
-        # NOTE: We intentionally do not attempt to backfill metrics.json on resume.
-        # If you want resume+continue metrics arrays, tell me and I’ll add it cleanly.
-
     early = EarlyStopping(
         patience=int(es_cfg.get("patience", 20)),
         min_delta=float(es_cfg.get("min_delta", 0.0)),
@@ -281,6 +277,9 @@ def main() -> None:
         f"epochs={epochs} batch_size={cfg['train']['batch_size']}"
     )
 
+    val_dump_dir = workdir / "val_dumps"
+    val_dump_dir.mkdir(parents=True, exist_ok=True)
+
     # =========================
     # Training loop
     # =========================
@@ -289,16 +288,21 @@ def main() -> None:
         if scheduler is not None:
             sched_info = scheduler.step(epoch - 1)
 
-        tr_stats = train_one_epoch(model=model, loader=train_loader, device=device, optimizer=optimizer)
+        tr_stats = train_one_epoch(
+            model=model,
+            loader=train_loader,
+            optimizer=optimizer,
+            device=device,
+        )
 
         do_dump = (epoch == start_epoch) or (dump_every > 0 and epoch % dump_every == 0)
-        va_stats, _dump_path = run_val_and_dump(
+        dump_path = (val_dump_dir / f"epoch_{epoch:03d}.csv") if do_dump else None
+
+        va_stats = run_val_and_dump(
             model=model,
             loader=val_loader,
             device=device,
-            epoch=epoch,
-            workdir=workdir,
-            dump=do_dump,
+            dump_path=dump_path,
         )
 
         lr = float(sched_info.get("lr", optimizer.param_groups[0].get("lr", 0.0)))
@@ -306,7 +310,6 @@ def main() -> None:
 
         monitor_score = _get_monitor_score(monitor, va_stats.loss, va_stats.acc)
 
-        # Per-epoch log (kept), but NO "new best" printing.
         logger.info(
             f"Epoch {epoch:03d}/{epochs:03d} | "
             f"train_loss={tr_stats.loss:.6f} val_loss={va_stats.loss:.6f} | "
@@ -314,7 +317,7 @@ def main() -> None:
             f"lr={lr:.8f} momentum={mom:.3f}"
         )
 
-        # ---- Save best only (by val_acc, as requested) ----
+        # ---- Save best only (by val_acc) ----
         if va_stats.acc > best_val_acc:
             best_val_acc = float(va_stats.acc)
             best_epoch = int(epoch)
@@ -337,7 +340,7 @@ def main() -> None:
             break
 
     # =========================
-    # Final summary (print once)
+    # Final summary
     # =========================
     logger.info("Training finished.")
     logger.info(f"Best model: epoch={best_epoch} | val_acc={best_val_acc:.4f}")
