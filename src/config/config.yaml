@@ -11,7 +11,7 @@ paths:
 # Optimization
 # =========================
 optim:
-  lr: 0.001
+  lr: 0.005
   lr_decay: 0.985
   momentum_start: 0.5
   momentum_final: 0.85
