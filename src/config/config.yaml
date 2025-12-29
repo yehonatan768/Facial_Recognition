@@ -78,7 +78,7 @@ paper:
 # ----------------------------
 advanced:
   background_remover:
-    enabled: true
+    enabled: false
     model: "u2net"  # adjust based on your installed rembg models
 
   face_mask:
