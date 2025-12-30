@@ -11,7 +11,7 @@ paths:
 # Split strategy
 # =========================
 split:
-  val_ratio: 0.30
+  val_ratio: 0.20
   target_pos_frac: 0.50
   min_val_identities: 30
   seed: 42
@@ -42,7 +42,7 @@ model:
   l2_eps: 1.0e-12
 
   # Mild dropout for small datasets (too much hurts)
-  dropout_p: 0.10
+  dropout_p: 0.0
 
   # ResNet options
   resnet_pretrained: true
@@ -89,7 +89,7 @@ pipeline:
 # Transform (shared)
 # =========================
 transform:
-  input_size: 160
+  input_size: 105
 
   # IMPORTANT for pretrained ResNet: ImageNet normalization
   mean: [0.485, 0.456, 0.406]
@@ -120,7 +120,7 @@ filters:
 # =========================
 advanced:
   # Slightly looser crop helps robustness (acts like translation/scale aug)
-  pre_crop_ratio: 0.92
+  pre_crop_ratio: 0.0
 
   face_mask:
     center: [0.0, 0.0]
@@ -153,14 +153,14 @@ augment:
     degrees: 3.0
 
   blur:
-    enabled: true
+    enabled: false
     p: 0.10
     kernel_size: 3
     sigma: [0.2, 0.8]
 
   # Erasing can help, but too much can hurt; keep modest
   random_erasing:
-    enabled: true
+    enabled: false
     p: 0.05
     scale: [0.02, 0.06]
     ratio: [0.3, 3.3]
