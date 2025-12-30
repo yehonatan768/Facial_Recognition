@@ -3,6 +3,6 @@ paths:
   project_root: ""              # optional; resolved at runtime
   images_root: "images"
   pairs_train: "assets/pairsDevTrain.txt"
-  pairs_val: "assets/pairsDevTest.txt"   # optional; if empty, split from train
+  pairs_val: ""   # optional; if empty, split from train
   pairs_test: "assets/pairsDevTest.txt"
   outputs_dir: "outputs"
