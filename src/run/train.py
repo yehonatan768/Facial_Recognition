@@ -200,14 +200,27 @@ def main() -> None:
             torch.save({"model": model.state_dict(), "epoch": best_epoch, "metric": best_metric}, best_path)
 
         if early is not None:
-            # Map monitor like "val_accuracy" into va_m["accuracy"]
-            mon = early.monitor
-            val_key = mon.replace("val_", "")
-            val_value = va_m.get(val_key, None) if mon.startswith("val_") else va_m.get(mon, None)
-            if val_value is None:
-                raise KeyError(f"EarlyStop monitor '{mon}' not found in validation metrics")
-            if early.update(float(val_value), epoch + 1):
-                logger.info("Early stopping at epoch %d (best epoch=%d best=%s=%.6f)", epoch + 1, early.best_epoch, early.monitor, float(early.best_value))
+            mon = str(early.monitor)
+
+            # Allow early stop on validation loss (scalar) or on any val_* metric
+            if mon in ("val_loss", "loss"):
+                val_value = float(va_loss)
+            elif mon.startswith("val_"):
+                key = mon.replace("val_", "")
+                if key not in va_m:
+                    raise KeyError(f"EarlyStop monitor '{mon}' not found in validation metrics: {sorted(va_m.keys())}")
+                val_value = float(va_m[key])
+            else:
+                # metrics dict keys without val_ prefix (rare, but supported)
+                if mon not in va_m:
+                    raise KeyError(f"EarlyStop monitor '{mon}' not found in validation metrics: {sorted(va_m.keys())}")
+                val_value = float(va_m[mon])
+
+            if early.update(val_value, epoch + 1):
+                logger.info(
+                    "Early stopping at epoch %d (best epoch=%d best=%s=%.6f)",
+                    epoch + 1, early.best_epoch, early.monitor, float(early.best_value)
+                )
                 break
 
     # -------------------------
