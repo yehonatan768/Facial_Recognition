@@ -12,6 +12,21 @@ from src.preprocess.paper_transforms import PaperImageTransform
 from src.preprocess.filters import build_equalize_from_cfg, build_edge_from_cfg
 
 
+def _as_float_list(v, n: int) -> list[float]:
+    """
+    Accepts scalar or list/tuple. Returns list[float] length n.
+    """
+    if isinstance(v, (int, float)):
+        return [float(v)] * n
+    if isinstance(v, (list, tuple)):
+        if len(v) == 1:
+            return [float(v[0])] * n
+        if len(v) != n:
+            raise ValueError(f"Expected list of length {n} (or 1), got {len(v)}: {v}")
+        return [float(x) for x in v]
+    raise TypeError(f"mean/std must be float or list/tuple, got: {type(v)}")
+
+
 def _require(cfg: Dict[str, Any], path: str) -> Any:
     cur: Any = cfg
     for k in path.split("."):
@@ -28,8 +43,14 @@ def build_transform_from_config(cfg: Dict[str, Any], train: bool) -> transforms.
     """
     mode = str(_require(cfg, "pipeline.mode")).strip().lower()
     input_size = int(_require(cfg, "transform.input_size"))
-    mean = float(_require(cfg, "transform.mean"))
-    std = float(_require(cfg, "transform.std"))
+    # Decide channels from model config (default 1)
+    in_channels = int(((cfg.get("model", {}) or {}).get("in_channels", 1)))
+
+    mean_raw = _require(cfg, "transform.mean")
+    std_raw = _require(cfg, "transform.std")
+
+    mean = _as_float_list(mean_raw, in_channels)
+    std = _as_float_list(std_raw, in_channels)
 
     if mode == "paper":
         return PaperImageTransform.from_config(cfg=cfg, train=train).t
