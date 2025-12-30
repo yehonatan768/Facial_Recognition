@@ -5,6 +5,9 @@ model:
   encoder:
     use_leaky_relu: true
     leaky_slope: 0.10
+    use_batchnorm: true
+    bn_on_conv4: false
+
     conv1_out: 64
     conv1_kernel: 10
     conv2_out: 128
