@@ -1,17 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 
+import math
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.sampler import Sampler
-from PIL import Image
 
 from src.data.load_data import load_image_rgb
 from src.data.transforms import build_transform
-
 
 Pair = Tuple[Path, Path, int]
 
@@ -40,7 +38,12 @@ class PairPathDataset(Dataset):
 
 
 class BalancedPairBatchSampler(Sampler[List[int]]):
-    """Batch sampler that yields half positive and half negative indices."""
+    """Batch sampler that yields half positive and half negative indices.
+
+    Deterministic-but-changing shuffle across epochs:
+      - Call set_epoch(e) once per epoch (train loop)
+      - Seed becomes seed + epoch
+    """
 
     def __init__(self, pairs: List[Pair], batch_size: int, seed: int = 42):
         if batch_size < 2:
@@ -54,10 +57,15 @@ class BalancedPairBatchSampler(Sampler[List[int]]):
             raise ValueError("BalancedPairBatchSampler requires both positive and negative examples")
 
         self.seed = int(seed)
+        self.epoch = 0
+        self._n_pairs = len(pairs)
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = int(epoch)
 
     def __iter__(self):
         g = torch.Generator()
-        g.manual_seed(self.seed)
+        g.manual_seed(self.seed + self.epoch)
 
         pos = torch.tensor(self.pos_idx)
         neg = torch.tensor(self.neg_idx)
@@ -65,38 +73,49 @@ class BalancedPairBatchSampler(Sampler[List[int]]):
         pos_perm = pos[torch.randperm(len(pos), generator=g)].tolist()
         neg_perm = neg[torch.randperm(len(neg), generator=g)].tolist()
 
-        # Cycle if one class runs out
         pi = 0
         ni = 0
-        while pi < len(pos_perm) or ni < len(neg_perm):
-            batch = []
+
+        # Yield a fixed number of batches per epoch for stable training logs
+        n_batches = len(self)
+        for _ in range(n_batches):
+            batch: List[int] = []
+
             for _ in range(self.half):
                 if pi >= len(pos_perm):
                     pi = 0
-                batch.append(int(pos_perm[pi])); pi += 1
+                batch.append(int(pos_perm[pi]))
+                pi += 1
+
             for _ in range(self.batch_size - self.half):
                 if ni >= len(neg_perm):
                     ni = 0
-                batch.append(int(neg_perm[ni])); ni += 1
+                batch.append(int(neg_perm[ni]))
+                ni += 1
+
             yield batch
 
     def __len__(self) -> int:
-        # approximate: number of batches to cover the larger class once
-        return max(len(self.pos_idx), len(self.neg_idx)) // self.half
+        # Stable batches per epoch: cover dataset roughly once
+        return int(math.ceil(self._n_pairs / float(self.batch_size)))
 
 
 def build_dataloaders(
     cfg: Dict[str, Any],
     train_pairs: List[Pair],
     val_pairs: List[Pair],
-    *,
-    num_workers: int = 2,
-    pin_memory: bool = True,
 ) -> Tuple[DataLoader, DataLoader]:
     transform = build_transform(cfg)
 
     bs = int(cfg.get("optim", {}).get("batch_size", 128))
     seed = int(cfg.get("train", {}).get("seed", 42))
+
+    # DataLoader performance knobs (override from cfg if present)
+    dcfg = cfg.get("data", {}) or {}
+    num_workers = int(dcfg.get("num_workers", 2))
+    pin_memory = bool(dcfg.get("pin_memory", True))
+    persistent_workers = bool(dcfg.get("persistent_workers", num_workers > 0))
+    prefetch_factor = int(dcfg.get("prefetch_factor", 2))  # only used when num_workers>0
 
     train_ds = PairPathDataset(train_pairs, transform=transform)
     val_ds = PairPathDataset(val_pairs, transform=transform)
@@ -108,6 +127,8 @@ def build_dataloaders(
         batch_sampler=sampler,
         num_workers=num_workers,
         pin_memory=pin_memory,
+        persistent_workers=persistent_workers if num_workers > 0 else False,
+        prefetch_factor=prefetch_factor if num_workers > 0 else None,
     )
     val_loader = DataLoader(
         val_ds,
@@ -115,5 +136,7 @@ def build_dataloaders(
         shuffle=False,
         num_workers=num_workers,
         pin_memory=pin_memory,
+        persistent_workers=persistent_workers if num_workers > 0 else False,
+        prefetch_factor=prefetch_factor if num_workers > 0 else None,
     )
     return train_loader, val_loader

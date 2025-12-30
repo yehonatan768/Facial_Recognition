@@ -1,22 +1,27 @@
 train:
-  device: "cuda"                 # "cuda" | "cpu"
-  epochs: 200
+  device: cuda
+  max_epochs: 200
   seed: 42
-
-  # If paths.pairs_val is empty, we split train pairs into train/val using identity-safe component splitting.
-  split:
-    val_ratio: 0.2
-    target_pos_frac: 0.5
-    min_val_identities: 30
-    seed: 42
+  deterministic: false
 
   early_stop:
     enabled: true
-    monitor: "val_loss"      # any metric key produced by training/metrics.py
-    mode: "min"                  # "max" or "min"
+    monitor: val_loss
+    mode: min
     patience: 10
     min_delta: 0.0
 
-  checkpoints:
-    save_best_only: true
-    metric: "val_accuracy"
+# Put split at TOP LEVEL so train.py always sees it
+split:
+  val_ratio: 0.2
+  target_pos_frac: 0.5
+  min_val_identities: 30
+  seed: 42
+
+# DataLoader performance knobs (TOP LEVEL so datasets.py can read cfg["data"])
+# For fastest startup while debugging, use num_workers=0.
+data:
+  num_workers: 0
+  pin_memory: false
+  persistent_workers: false
+  prefetch_factor: 2
