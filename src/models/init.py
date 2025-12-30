@@ -1,57 +1,93 @@
 from __future__ import annotations
 
+from typing import Any, Dict, Optional
+
+import torch
 import torch.nn as nn
 
+from src.models.siamese import SiameseModel
 
-def init_weights_like_paper(model: nn.Module) -> None:
+
+def _init_conv_like_paper(m: nn.Conv2d) -> None:
+    # Paper uses N(0, 0.01) for conv weights and bias=0.5
+    nn.init.normal_(m.weight, mean=0.0, std=0.01)
+    if m.bias is not None:
+        nn.init.constant_(m.bias, 0.5)
+
+
+def _init_linear_like_paper(m: nn.Linear) -> None:
+    # Paper uses N(0, 0.2) for FC weights and bias=0.5
+    nn.init.normal_(m.weight, mean=0.0, std=0.2)
+    if m.bias is not None:
+        nn.init.constant_(m.bias, 0.5)
+
+
+def init_model_weights(model: SiameseModel, cfg: Optional[Dict[str, Any]] = None) -> None:
     """
-    Koch et al. (2015) initialization:
+    Weight init policy:
 
-      Conv2d:
-        W ~ N(0, 1e-2)
-        b ~ N(0.5, 1e-2)
+    - If encoder == paper_cnn:
+        initialize conv/fc exactly like the paper, and initialize the head.
+    - If encoder == resnet18 and pretrained == True:
+        DO NOT overwrite pretrained backbone weights.
+        Initialize ONLY:
+          * backbone.fc (the projection layer we replaced)
+          * backbone.conv1 if you replaced it (in_channels != 3)
+          * verification head parameters (e.g. alpha / cosine scale+bias)
 
-      Linear (fully-connected):
-        W ~ N(0, 2e-1)
-        b ~ N(0.5, 1e-2)
+    - If encoder == resnet18 and pretrained == False:
+        you may initialize the full encoder (rarely useful); we still only init
+        the replaced layers + head by default (safer).
 
-    This applies to ALL Linear layers, including the final weighted-L1 alpha layer,
-    treating it as the paper's final fully-connected layer.
+    This prevents the most common "accuracy stuck at ~0.5" failure mode:
+    accidentally re-initializing a pretrained encoder and then freezing it.
     """
-    for m in model.modules():
-        if isinstance(m, nn.Conv2d):
-            nn.init.normal_(m.weight, mean=0.0, std=1e-2)
-            if m.bias is not None:
-                nn.init.normal_(m.bias, mean=0.5, std=1e-2)
+    enc_name = getattr(model, "encoder_name", "").lower()
 
-        elif isinstance(m, nn.Linear):
-            nn.init.normal_(m.weight, mean=0.0, std=2e-1)
-            if m.bias is not None:
-                nn.init.normal_(m.bias, mean=0.5, std=1e-2)
+    if enc_name == "paper_cnn":
+        for m in model.modules():
+            if isinstance(m, nn.Conv2d):
+                _init_conv_like_paper(m)
+            elif isinstance(m, nn.Linear):
+                _init_linear_like_paper(m)
 
+        # Head init: make sure it's not left at default init
+        if hasattr(model, "head") and isinstance(getattr(model.head, "alpha", None), nn.Linear):
+            _init_linear_like_paper(model.head.alpha)
+        return
 
-def init_weights_like_paper_encoder_only(model: nn.Module) -> None:
-    """
-    Same as init_weights_like_paper(), but intended for cases where you do NOT want
-    to apply the FC-style init to the head alpha layer.
+    # ---- resnet18 path ----
+    # initialize only replaced parts + head
+    enc = getattr(model, "encoder", None)
+    backbone = getattr(enc, "backbone", None)
 
-    It will initialize:
-      - all Conv2d layers (conv-style)
-      - all Linear layers EXCEPT those with out_features == 1 and bias == False
-        (the typical shape of the paper's alpha head)
+    if isinstance(backbone, nn.Module):
+        # conv1 may have been replaced when in_channels != 3
+        if hasattr(backbone, "conv1") and isinstance(backbone.conv1, nn.Conv2d):
+            # If conv1 was replaced, it will have in_channels != 3
+            if getattr(backbone.conv1, "in_channels", 3) != 3:
+                nn.init.kaiming_normal_(backbone.conv1.weight, mode="fan_out", nonlinearity="relu")
+                if backbone.conv1.bias is not None:
+                    nn.init.zeros_(backbone.conv1.bias)
 
-    Use this if you want alpha weights to stay at their constructor init (often 1.0).
-    """
-    for m in model.modules():
-        if isinstance(m, nn.Conv2d):
-            nn.init.normal_(m.weight, mean=0.0, std=1e-2)
-            if m.bias is not None:
-                nn.init.normal_(m.bias, mean=0.5, std=1e-2)
+        # fc is always replaced to match embedding_dim
+        if hasattr(backbone, "fc") and isinstance(backbone.fc, nn.Linear):
+            nn.init.normal_(backbone.fc.weight, mean=0.0, std=0.02)
+            if backbone.fc.bias is not None:
+                nn.init.zeros_(backbone.fc.bias)
 
-        elif isinstance(m, nn.Linear):
-            is_alpha_like = (m.out_features == 1) and (m.bias is None)
-            if is_alpha_like:
-                continue
-            nn.init.normal_(m.weight, mean=0.0, std=2e-1)
-            if m.bias is not None:
-                nn.init.normal_(m.bias, mean=0.5, std=1e-2)
+    # Head init
+    if hasattr(model, "head"):
+        # WeightedL1Head
+        if isinstance(getattr(model.head, "alpha", None), nn.Linear):
+            nn.init.normal_(model.head.alpha.weight, mean=0.0, std=0.02)
+            if model.head.alpha.bias is not None:
+                nn.init.zeros_(model.head.alpha.bias)
+        # CosineHead
+        if hasattr(model.head, "log_scale") and isinstance(model.head.log_scale, torch.nn.Parameter):
+            with torch.no_grad():
+                # keep whatever init_scale was passed, but clamp to sane range
+                model.head.log_scale.data = model.head.log_scale.data.clamp(torch.tensor(-2.0), torch.tensor(6.0))
+        if hasattr(model.head, "bias") and isinstance(getattr(model.head, "bias", None), torch.nn.Parameter):
+            with torch.no_grad():
+                model.head.bias.data.zero_()

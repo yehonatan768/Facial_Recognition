@@ -1,77 +1,66 @@
 from __future__ import annotations
 
-from typing import Tuple
+from dataclasses import dataclass
+from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class WeightedL1Head(nn.Module):
     """
-    Koch et al. (2015) Siamese join layer (Section 3.1):
+    Paper join layer (Koch et al., 2015), but with an optional bias term.
 
-      d_j = |h1_j - h2_j|
-      s   = sum_j alpha_j * d_j
-      p   = sigmoid(s)
-
-    Implemented as:
-      d = abs(h1 - h2)              # (B, D)
-      s = Linear(d) with bias=False # (B, 1), weights are alpha
-      p = sigmoid(s)                # (B, 1)
+      d = |h1 - h2|
+      logit = a^T d + b
+      p = sigmoid(logit)
 
     Notes:
-    - The paper describes the alpha_j as learnable parameters weighting each
-      component-wise distance term. :contentReference[oaicite:1]{index=1}
-    - No extra MLP; no second sigmoid; the sigmoid is applied once at the end.
+    - Exposing `logits()` lets training use BCEWithLogitsLoss (more stable).
+    - The bias improves calibration around the fixed 0.5 threshold.
     """
 
-    def __init__(self, embedding_dim: int = 4096):
+    def __init__(self, embedding_dim: int, bias: bool = True):
         super().__init__()
         self.embedding_dim = int(embedding_dim)
-
-        # weights correspond to alpha_j, bias not described in the paper -> keep bias=False
-        self.alpha = nn.Linear(self.embedding_dim, 1, bias=False)
-
+        self.alpha = nn.Linear(self.embedding_dim, 1, bias=bool(bias))
 
     def logits(self, h1: torch.Tensor, h2: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-          h1, h2: (B, D) embeddings from the shared CNN encoder (D=4096 in paper)
-
-        Returns:
-          logits: (B, 1) pre-sigmoid score
-        """
-        if h1.shape != h2.shape:
-            raise ValueError(f"h1 and h2 must have the same shape. Got {tuple(h1.shape)} vs {tuple(h2.shape)}")
-        if h1.dim() != 2:
-            raise ValueError(f"h1/h2 must be 2D (B,D). Got {tuple(h1.shape)}")
-        if h1.size(1) != self.embedding_dim:
-            raise ValueError(
-                f"Expected embedding_dim={self.embedding_dim}, got D={h1.size(1)}. "
-                f"Make sure your encoder outputs the paper embedding size."
-            )
-
-        d = torch.abs(h1 - h2)       # (B, D)
-        s = self.alpha(d)            # (B, 1)
-        return s
+        d = torch.abs(h1 - h2)
+        return self.alpha(d).squeeze(-1)  # (B,)
 
     def forward(self, h1: torch.Tensor, h2: torch.Tensor) -> torch.Tensor:
-        """Returns p_same = sigmoid(logits)."""
+        return torch.sigmoid(self.logits(h1, h2))  # (B,)
+
+
+class CosineHead(nn.Module):
+    """
+    A strong baseline for verification with L2-normalized embeddings:
+
+      cos = cosine_similarity(h1, h2) in [-1, 1]
+      logit = scale * cos + bias
+      p = sigmoid(logit)
+
+    This tends to be better behaved with fixed thresholding than Weighted-L1
+    when embeddings are L2-normalized.
+    """
+
+    def __init__(self, init_scale: float = 10.0, bias: bool = True):
+        super().__init__()
+        self.log_scale = nn.Parameter(torch.tensor(float(init_scale)).log())
+        self.bias = nn.Parameter(torch.zeros(())) if bias else None
+
+    def logits(self, h1: torch.Tensor, h2: torch.Tensor) -> torch.Tensor:
+        # h1/h2 may already be normalized, but normalize again defensively.
+        h1n = F.normalize(h1, p=2, dim=1)
+        h2n = F.normalize(h2, p=2, dim=1)
+        cos = (h1n * h2n).sum(dim=1)  # (B,)
+        scale = self.log_scale.exp().clamp(1e-3, 1e3)
+        logit = scale * cos
+        if self.bias is not None:
+            logit = logit + self.bias
+        return logit
+
+    def forward(self, h1: torch.Tensor, h2: torch.Tensor) -> torch.Tensor:
         return torch.sigmoid(self.logits(h1, h2))
-
-    def raw_score(self, h1: torch.Tensor, h2: torch.Tensor) -> torch.Tensor:
-        """
-        Returns the pre-sigmoid score s = sum_j alpha_j * |h1_j - h2_j|.
-        Useful for thresholding/analysis.
-        """
-        if h1.shape != h2.shape:
-            raise ValueError(f"h1 and h2 must have the same shape. Got {tuple(h1.shape)} vs {tuple(h2.shape)}")
-        return self.logits(h1, h2)
-
-
-if __name__ == "__main__":
-    head = WeightedL1Head(embedding_dim=4096)
-    h1 = torch.randn(4, 4096)
-    h2 = torch.randn(4, 4096)
-    p = head(h1, h2)
-    print(p.shape)  # expected: torch.Size([4, 1])

@@ -18,7 +18,7 @@ from src.data.graph_split import split_by_components
 from src.data.datasets import build_pair_loaders
 
 from src.models.siamese import SiameseModel
-from src.models.init import init_weights_like_paper_encoder_only
+from src.models.init import init_model_weights
 from src.training.optim import build_optimizer_and_scheduler
 from src.training.loop import train_one_epoch, run_val_and_dump
 from src.training.early_stop import EarlyStopping
@@ -245,6 +245,8 @@ def main() -> None:
     # Backward compatible mapping
     enforce_input_size = bool(model_cfg.get("enforce_input_size", model_cfg.get("enforce_105", True)))
 
+    model_head = (model_cfg.get("head", {}) or {})
+    head_type = str(model_head.get("type", "cosine" if str(model_cfg.get("encoder", "paper_cnn")).lower() == "resnet18" else "weighted_l1"))
     model = SiameseModel(
         encoder=str(model_cfg.get("encoder", "paper_cnn")),
         in_channels=int(model_cfg.get("in_channels", 1)),
@@ -260,6 +262,10 @@ def main() -> None:
 
         resnet_pretrained=bool(model_cfg.get("resnet_pretrained", True)),
         resnet_freeze_backbone=bool(model_cfg.get("resnet_freeze_backbone", False)),
+
+        head_type=head_type,
+        head_bias=bool(model_head.get("bias", True)),
+        cosine_init_scale=float(model_head.get("cosine_init_scale", 10.0)),
     ).to(device)
 
     logger.info(
@@ -279,9 +285,9 @@ def main() -> None:
     # - For pretrained ResNet, do NOT overwrite backbone weights.
     enc_name = str(model_cfg.get("encoder", "paper_cnn")).lower()
     if enc_name in {"paper", "paper_cnn", "cnn", "koch"}:
-        init_weights_like_paper_encoder_only(model)
+        init_model_weights(model, cfg)
     elif enc_name in {"resnet18", "resnet"} and not bool(model_cfg.get("resnet_pretrained", True)):
-        init_weights_like_paper_encoder_only(model)
+        init_model_weights(model, cfg)
 
     optim_bundle = build_optimizer_and_scheduler(model=model, cfg=cfg)
     optimizer = optim_bundle.optimizer
@@ -336,6 +342,16 @@ def main() -> None:
     # Training loop
     # =========================
     for epoch in range(start_epoch, epochs + 1):
+        # Unfreeze ResNet backbone after a few warmup epochs (if configured).
+        if getattr(model, 'encoder_name', '').lower() == 'resnet18':
+            freeze_epochs = int(model_cfg.get('resnet_freeze_backbone_epochs', 0))
+            if bool(model_cfg.get('resnet_freeze_backbone', False)) and freeze_epochs > 0 and epoch == (start_epoch + freeze_epochs):
+                logger.info(f"[Model] Unfreezing ResNet backbone at epoch {epoch} (freeze_epochs={freeze_epochs})")
+                model.freeze_backbone(False)
+                # Rebuild optimizer to include newly-trainable backbone params.
+                optim_bundle = build_optimizer_and_scheduler(model=model, cfg=cfg)
+                optimizer = optim_bundle.optimizer
+                scheduler = optim_bundle.scheduler
         # Optional: warm-start for pretrained ResNet (stabilizes training on small datasets)
         if hasattr(model, "encoder") and hasattr(model.encoder, "set_backbone_trainable"):
             freeze_epochs = int(model_cfg.get("resnet_freeze_backbone_epochs", 0) or 0)
