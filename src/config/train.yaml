@@ -4,12 +4,12 @@ train:
   seed: 42
   deterministic: false
 
-  early_stop:
+early_stop:
     enabled: true
-    monitor: val_loss
-    mode: min
-    patience: 10
-    min_delta: 0.0
+    monitor: val_accuracy
+    mode: max
+    patience: 25
+    min_delta: 0.002
 
 # Put split at TOP LEVEL so train.py always sees it
 split:
