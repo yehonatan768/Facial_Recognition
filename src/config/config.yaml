@@ -8,6 +8,26 @@ paths:
   pairs_test: assets/pairsDevTest.txt
 
 # =========================
+# Split strategy
+# =========================
+split:
+  val_ratio: 0.3
+  target_pos_frac: 0.50
+  min_val_identities: 30
+  seed: 42
+
+# =========================
+# Model
+# =========================
+model:
+  in_channels: 1
+  enforce_105: true
+  embedding_dim: 1024
+  l2_normalize: true
+  l2_eps: 1e-12
+  dropout_p: 0.3
+
+# =========================
 # Optimization
 # =========================
 optim:
@@ -20,7 +40,7 @@ optim:
   weight_decay: 0.0001
   weight_decay_conv: 0.00005
   weight_decay_fc: 0.0002
-  weight_decay_alpha: 0.0   # up from 0.0001
+  weight_decay_alpha: 0.0    # up from 0.0001
 
 # =========================
 # Data
@@ -118,22 +138,6 @@ train:
   batch_size: 64
   dump_every: 10
 
-# =========================
-# Split strategy
-# =========================
-split:
-  val_ratio: 0.3
-  target_pos_frac: 0.50
-  min_val_identities: 30
-  seed: 42
-
-# =========================
-# Model
-# =========================
-model:
-  in_channels: 1
-  enforce_105: true
-  embedding_dim: 1024
 
 # =========================
 # Early stopping

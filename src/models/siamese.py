@@ -9,28 +9,24 @@ from src.models.cnn_encoder import CNNEncoder
 from src.models.head import WeightedL1Head
 
 
-class PaperSiameseModel(nn.Module):
-    """
-    Full paper-style Siamese model:
-
-      x1 -> shared CNNEncoder -> h1 (B,4096)
-      x2 -> shared CNNEncoder -> h2 (B,4096)
-      p_same = WeightedL1Head(h1, h2) -> (B,1)
-
-    Returns:
-      p_same, h1, h2
-
-    This matches the paper’s description:
-    - twin networks with tied weights
-    - component-wise weighted L1 distance + sigmoid output :contentReference[oaicite:1]{index=1}
-    """
-
-    def __init__(self, in_channels: int = 1, enforce_105: bool = True, embedding_dim: int = 4096):
+class SiameseModel(nn.Module):
+    def __init__(
+        self,
+        in_channels: int = 1,
+        input_size: int = 105,
+        enforce_input_size: bool = True,
+        embedding_dim: int = 4096,
+        embed_activation: str = "sigmoid",  # keep "sigmoid" for paper, allow "none"
+    ):
         super().__init__()
-        if embedding_dim != 4096:
-            raise ValueError("Paper model uses embedding_dim=4096. If you change it, it's not paper-exact.")
 
-        self.encoder = CNNEncoder(in_channels=in_channels, enforce_105=enforce_105)
+        self.encoder = CNNEncoder(
+            in_channels=in_channels,
+            input_size=input_size,
+            embedding_dim=embedding_dim,
+            enforce_input_size=enforce_input_size,
+            embed_activation=embed_activation,
+        )
         self.head = WeightedL1Head(embedding_dim=embedding_dim)
 
     def forward_once(self, x: torch.Tensor) -> torch.Tensor:

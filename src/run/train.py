@@ -17,7 +17,7 @@ from src.data.load_data import load_train_test_pairs
 from src.data.graph_split import split_by_components
 from src.data.datasets import build_pair_loaders
 
-from src.models.siamese import PaperSiameseModel
+from src.models.siamese import SiameseModel
 from src.models.init import init_weights_like_paper
 from src.training.optim import build_optimizer_and_scheduler
 from src.training.loop import train_one_epoch, run_val_and_dump
@@ -227,7 +227,7 @@ def main() -> None:
     val_loader = loaders.val_loader
 
     model_cfg = cfg.get("model", {}) or {}
-    model = PaperSiameseModel(
+    model = SiameseModel(
         in_channels=int(model_cfg.get("in_channels", 1)),
         enforce_105=bool(model_cfg.get("enforce_105", True)),
         embedding_dim=int(model_cfg.get("embedding_dim", 4096)),
