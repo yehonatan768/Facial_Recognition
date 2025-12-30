@@ -13,9 +13,9 @@ from src.utils.io import save_json
 from src.data.load_pairs import parse_pairs_file
 from src.data.graph_split import split_by_components
 from src.data.datasets import build_dataloaders, Pair
-from src.model.cnn_embedder import ConvEmbeddingConfig
-from src.model.head import SimilarityHeadConfig
-from src.model.siamese import SiameseConfig, SiameseNet
+from src.model.cnn_embedder import ConvEmbeddingConfig, ConvEmbeddingNet
+from src.model.head import SimilarityHeadConfig, WeightedL1Head
+from src.model.siamese import SiameseNet
 from src.model.init import init_weights_like_reference
 from src.training.optim import build_optimizer, step_schedule
 from src.training.loop import train_one_epoch, eval_one_epoch
@@ -68,7 +68,7 @@ def main() -> None:
     logger.info("Device: %s", device)
 
     # -------------------------
-    # Data
+    # Data: TRAIN + (VAL split from TRAIN unless paths.pairs_val is set)
     # -------------------------
     paths = cfg.get("paths", {})
     images_root = (project_root / str(paths["images_root"])).resolve()
@@ -78,44 +78,47 @@ def main() -> None:
     train_pairs: List[Pair] = parse_pairs_file(pairs_train, images_root=images_root)
 
     if pairs_val_str:
+        # Explicit val file (use only if you truly have one; DO NOT point this at test)
         val_pairs = parse_pairs_file((project_root / pairs_val_str).resolve(), images_root=images_root)
+        logger.info("Validation source: pairs_val file=%s", (project_root / pairs_val_str).resolve())
     else:
         split_cfg = cfg.get("split", {})
-        val_pairs, train_pairs = split_by_components(
+        res = split_by_components(
             train_pairs,
             val_ratio=float(split_cfg.get("val_ratio", 0.2)),
             target_pos_frac=float(split_cfg.get("target_pos_frac", 0.5)),
             min_val_identities=int(split_cfg.get("min_val_identities", 30)),
             seed=seed,
+            logger=logger,
         )
+        val_pairs = res.val_pairs
+        train_pairs = res.train_pairs
+        logger.info("Validation source: split_from_train (train_txt=%s)", pairs_train)
 
     train_loader, val_loader = build_dataloaders(cfg, train_pairs, val_pairs)
+
     logger.info("Loaded train pairs: %d", len(train_pairs))
     logger.info("Loaded val pairs: %d", len(val_pairs))
 
     # -------------------------
-    # Model (logits output)
+    # Model (logits)
     # -------------------------
     enc_cfg = ConvEmbeddingConfig(**cfg["model"]["encoder"])
-    head_cfg = SimilarityHeadConfig(**cfg["model"]["head"])
-
-    # SiameseNet expects encoder/head MODULES (your siamese.py)
-    from src.model.cnn_embedder import ConvEmbeddingNet
-    from src.model.head import WeightedL1Head
+    _ = SimilarityHeadConfig(**cfg["model"]["head"])  # kept for config completeness
 
     encoder = ConvEmbeddingNet(enc_cfg)
     head = WeightedL1Head(dim=int(enc_cfg.fc_out))
     model = SiameseNet(encoder=encoder, head=head).to(device)
 
-    # Lazy-FC materialization + init (use TRAIN batch, not val)
+    # Lazy-FC materialization + init (use TRAIN batch only)
     init_weights_like_reference(model)
     with torch.no_grad():
-        x1, x2, _ = next(iter(train_loader))
+        x1, x2, _y = next(iter(train_loader))
         _ = model(x1.to(device), x2.to(device))
     init_weights_like_reference(model)
 
     # -------------------------
-    # Optim (SGD + exp lr decay + linear momentum ramp)
+    # Optim
     # -------------------------
     optim_cfg = cfg.get("optim", {})
     state = build_optimizer(
@@ -142,29 +145,37 @@ def main() -> None:
     best_epoch = 0
 
     max_epochs = int(cfg.get("train", {}).get("max_epochs", 200))
-    history: Dict[str, List[float]] = {"epoch": [], "train_loss": [], "val_loss": []}
+
+    history: Dict[str, List[float]] = {
+        "epoch": [],
+        "train_loss": [],
+        "val_loss": [],
+        "train_accuracy": [],
+        "val_accuracy": [],
+    }
 
     for epoch in range(max_epochs):
-        # IMPORTANT: your loop.py signature is (model, loader, optimizer, device)
-        tr_loss = train_one_epoch(model, train_loader, state.optimizer, device)
-        va_loss = eval_one_epoch(model, val_loader, device)
+        tr_loss, tr_acc = train_one_epoch(model, train_loader, state.optimizer, device)
+        va_loss, va_acc = eval_one_epoch(model, val_loader, device)
 
-        # schedule step (epoch index)
         step_schedule(state, epoch)
 
         history["epoch"].append(epoch + 1)
         history["train_loss"].append(float(tr_loss))
         history["val_loss"].append(float(va_loss))
+        history["train_accuracy"].append(float(tr_acc))
+        history["val_accuracy"].append(float(va_acc))
 
         logger.info(
-            "Epoch %03d/%03d | train_loss=%.6f | val_loss=%.6f",
+            "Epoch %03d/%03d | loss: train=%.6f val=%.6f | acc: train=%.4f val=%.4f",
             epoch + 1,
             max_epochs,
             tr_loss,
             va_loss,
+            tr_acc,
+            va_acc,
         )
 
-        # best checkpoint by val_loss
         if float(va_loss) < best_val:
             best_val = float(va_loss)
             best_epoch = epoch + 1
@@ -180,6 +191,13 @@ def main() -> None:
             break
 
     save_json(run_dir / "history.json", history)
+
+    try:
+        import yaml
+        (run_dir / "config_merged.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+    except Exception:
+        pass
+
     save_json(run_dir / "results.json", {"best_epoch": best_epoch, "best_val_loss": best_val})
 
     plot_loss_curves(history, run_dir / "plots")
