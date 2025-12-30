@@ -56,6 +56,7 @@ def build_optimizer(
 ) -> OptimState:
     """
     Build an SGD optimizer with per-layer param groups and schedule state.
+
     layerwise: dict mapping group names -> LayerHyper or dict {lr, momentum_target, weight_decay}
     Expected keys: conv1, conv2, conv3, conv4, fc, head
     """
@@ -72,14 +73,18 @@ def build_optimizer(
 
     def add_group(name: str, params: list[nn.Parameter], h: Any) -> None:
         h = _as_layer_hyper(h)
+        base_lr = float(h.lr)
         groups.append(
             {
                 "name": name,
                 "params": params,
-                "lr": float(h.lr),
+                # PyTorch optimizer uses these keys:
+                "lr": base_lr,
                 "momentum": float(momentum_start),
-                "_momentum_target": float(h.momentum_target),
                 "weight_decay": float(h.weight_decay),
+                # Internal schedule keys (we keep them separate and stable):
+                "_lr0": base_lr,
+                "_momentum_target": float(h.momentum_target),
             }
         )
 
@@ -90,7 +95,7 @@ def build_optimizer(
     add_group("conv4", list(enc.conv4.parameters()), layerwise["conv4"])
 
     # fc might be lazily created; if not created yet, just skip it for now.
-    # It will be created after first forward; you should rebuild the optimizer then if you want FC separate.
+    # If you want fc as a separate group, rebuild optimizer after fc exists.
     if getattr(enc, "fc", None) is not None:
         add_group("fc", list(enc.fc.parameters()), layerwise["fc"])
 
@@ -112,21 +117,28 @@ def build_optimizer(
 
 def step_schedule(state: OptimState, epoch_idx: int) -> None:
     """
-    Exponential LR decay each epoch and linear momentum ramp.
-    Call once per epoch.
-    """
-    # Exponential LR decay: lr = base_lr * (lr_decay ** epoch_idx)
-    for g in state.optimizer.param_groups:
-        base_lr = float(g["lr"])  # note: this is the "current" lr slot; we treat it as base at epoch 0
-        # To avoid compounding error, store initial lr once
-        if "_lr0" not in g:
-            g["_lr0"] = base_lr
-        g["lr"] = float(g["_lr0"]) * (state.lr_decay ** int(epoch_idx))
+    Paper-style scheduler.
+    Call once per epoch, typically at the START of the epoch.
 
-    # Linear momentum ramp: from momentum_start to momentum_target over ramp epochs
-    t = 1.0
-    if state.momentum_ramp_epochs > 0:
-        t = min(1.0, max(0.0, (epoch_idx + 1) / float(state.momentum_ramp_epochs)))
+      LR:       lr(epoch) = lr0 * (lr_decay ** epoch_idx)   (true exponential)
+      Momentum: linear ramp from momentum_start -> momentum_target over momentum_ramp_epochs
+    """
+    e = int(epoch_idx)
+
+    # --- Exponential LR decay (true exponential, no linear approximation) ---
+    # IMPORTANT: use the stored _lr0 (base LR) so we do NOT compound floating error
+    for g in state.optimizer.param_groups:
+        lr0 = float(g.get("_lr0", g["lr"]))  # fallback for safety
+        g["lr"] = lr0 * (state.lr_decay ** e)
+
+    # --- Linear momentum ramp ---
+    # We want: epoch 0 => momentum_start, epoch (ramp_epochs-1) => ~target, then clamp at target.
+    if state.momentum_ramp_epochs <= 0:
+        t = 1.0
+    else:
+        # Use epoch_idx+1 so momentum starts ramping immediately like your logs (0.508 at epoch 1 with start=0.5)
+        t = (e + 1) / float(state.momentum_ramp_epochs)
+        t = min(1.0, max(0.0, t))
 
     for g in state.optimizer.param_groups:
         m0 = float(state.momentum_start)

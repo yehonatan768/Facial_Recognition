@@ -1,7 +1,7 @@
 optim:
   name: "sgd"
   batch_size: 128
-  lr_decay: 0.99                # multiplicative decay per epoch (exponential schedule)
+  lr_decay: 0.985                # multiplicative decay per epoch (exponential schedule)
   momentum_start: 0.5
   momentum_ramp_epochs: 50      # linear ramp from momentum_start to momentum_target
   # Layer-wise hyperparameters (eta_j, mu_j, lambda_j)
