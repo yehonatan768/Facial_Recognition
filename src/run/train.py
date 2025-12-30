@@ -18,7 +18,7 @@ from src.data.graph_split import split_by_components
 from src.data.datasets import build_pair_loaders
 
 from src.models.siamese import SiameseModel
-from src.models.init import init_weights_like_paper
+from src.models.init import init_weights_like_paper_encoder_only
 from src.training.optim import build_optimizer_and_scheduler
 from src.training.loop import train_one_epoch, run_val_and_dump
 from src.training.early_stop import EarlyStopping
@@ -254,7 +254,7 @@ def main() -> None:
         f"dropout_p={model_cfg.get('dropout_p', 0.0)}"
     )
 
-    init_weights_like_paper(model)
+    init_weights_like_paper_encoder_only(model)
 
     optim_bundle = build_optimizer_and_scheduler(model=model, cfg=cfg)
     optimizer = optim_bundle.optimizer
