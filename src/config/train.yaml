@@ -12,7 +12,7 @@ train:
 
   early_stop:
     enabled: true
-    monitor: "val_loss"      # any metric key produced by training/metrics.py
+    monitor: "validation_loss"      # any metric key produced by training/metrics.py
     mode: "min"                  # "max" or "min"
     patience: 20
     min_delta: 0.0
