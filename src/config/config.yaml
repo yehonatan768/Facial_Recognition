@@ -21,11 +21,14 @@ split:
 # =========================
 model:
   in_channels: 1
-  enforce_105: true
-  embedding_dim: 1024
+  embedding_dim: 1024          # try 1024 for better generalization
+  enforce_input_size: true     # or keep enforce_105; train.py maps it
+
+  activation: leaky_relu       # or relu
+  embed_activation: none       # for L2 embeddings; "sigmoid" for strict paper
   l2_normalize: true
   l2_eps: 1e-12
-  dropout_p: 0.3
+  dropout_p: 0.3               # 0.2-0.4 often helps; start 0.3
 
 # =========================
 # Optimization

@@ -16,7 +16,11 @@ class SiameseModel(nn.Module):
         input_size: int = 105,
         enforce_input_size: bool = True,
         embedding_dim: int = 4096,
-        embed_activation: str = "sigmoid",  # keep "sigmoid" for paper, allow "none"
+        activation: str = "leaky_relu",
+        embed_activation: str = "none",
+        l2_normalize: bool = True,
+        l2_eps: float = 1e-12,
+        dropout_p: float = 0.0,
     ):
         super().__init__()
 
@@ -25,25 +29,18 @@ class SiameseModel(nn.Module):
             input_size=input_size,
             embedding_dim=embedding_dim,
             enforce_input_size=enforce_input_size,
+            activation=activation,
             embed_activation=embed_activation,
+            l2_normalize=l2_normalize,
+            l2_eps=l2_eps,
+            dropout_p=dropout_p,
         )
         self.head = WeightedL1Head(embedding_dim=embedding_dim)
 
     def forward_once(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass for a single image through the shared encoder.
-        """
         return self.encoder(x)
 
     def forward(self, x1: torch.Tensor, x2: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Forward pass for a pair.
-
-        Returns:
-          p_same: (B,1)
-          h1: (B,4096)
-          h2: (B,4096)
-        """
         h1 = self.encoder(x1)
         h2 = self.encoder(x2)
         p_same = self.head(h1, h2)
@@ -51,8 +48,5 @@ class SiameseModel(nn.Module):
 
     @torch.no_grad()
     def score(self, x1: torch.Tensor, x2: torch.Tensor) -> torch.Tensor:
-        """
-        Convenience method: returns p_same only.
-        """
         p_same, _, _ = self.forward(x1, x2)
         return p_same

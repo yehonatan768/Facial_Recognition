@@ -227,10 +227,23 @@ def main() -> None:
     val_loader = loaders.val_loader
 
     model_cfg = cfg.get("model", {}) or {}
+    tr_cfg = cfg.get("transform", {}) or {}
+
+    # Backward compatible: if your YAML still uses enforce_105, map it.
+    enforce_input_size = bool(model_cfg.get("enforce_input_size", model_cfg.get("enforce_105", True)))
+
     model = SiameseModel(
         in_channels=int(model_cfg.get("in_channels", 1)),
-        enforce_105=bool(model_cfg.get("enforce_105", True)),
+        input_size=int(tr_cfg.get("input_size", 105)),
+        enforce_input_size=enforce_input_size,
         embedding_dim=int(model_cfg.get("embedding_dim", 4096)),
+
+        # optional but recommended to expose:
+        activation=str(model_cfg.get("activation", "leaky_relu")),
+        embed_activation=str(model_cfg.get("embed_activation", "none")),
+        l2_normalize=bool(model_cfg.get("l2_normalize", True)),
+        l2_eps=float(model_cfg.get("l2_eps", 1e-12)),
+        dropout_p=float(model_cfg.get("dropout_p", 0.0)),
     ).to(device)
 
     init_weights_like_paper(model)
