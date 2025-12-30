@@ -15,16 +15,14 @@ class SiameseConfig:
     head: SimilarityHeadConfig
 
 
-class SiameseNetwork(nn.Module):
-    """End-to-end siamese verification model."""
-
-    def __init__(self, cfg: SiameseConfig):
+class SiameseNet(nn.Module):
+    def __init__(self, encoder: nn.Module, head: nn.Module):
         super().__init__()
-        self.cfg = cfg
-        self.encoder = ConvEmbeddingNet(cfg.encoder)
-        self.head = WeightedL1Head(embed_dim=cfg.encoder.fc_out, cfg=cfg.head)
+        self.encoder = encoder
+        self.head = head
 
     def forward(self, x1: torch.Tensor, x2: torch.Tensor) -> torch.Tensor:
         h1 = self.encoder(x1)
         h2 = self.encoder(x2)
-        return self.head(h1, h2)
+        logits = self.head(h1, h2)
+        return logits  # logits ONLY
