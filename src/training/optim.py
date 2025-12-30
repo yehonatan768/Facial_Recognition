@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Any, Mapping
 
 import torch
 import torch.nn as nn
@@ -12,6 +12,27 @@ class LayerHyper:
     lr: float
     momentum_target: float
     weight_decay: float
+
+
+def _as_layer_hyper(h: Any) -> LayerHyper:
+    """
+    Accept either:
+      - LayerHyper
+      - dict-like: {"lr": ..., "momentum_target": ..., "weight_decay": ...}
+    """
+    if isinstance(h, LayerHyper):
+        return h
+    if isinstance(h, Mapping):
+        # allow a few common aliases
+        lr = float(h.get("lr"))
+        mt = h.get("momentum_target", h.get("momentum", h.get("momentum_final")))
+        if mt is None:
+            raise KeyError("layerwise.*.momentum_target (or momentum/momentum_final) is missing")
+        wd = float(h.get("weight_decay", 0.0))
+        return LayerHyper(lr=lr, momentum_target=float(mt), weight_decay=wd)
+
+    raise TypeError(f"Unsupported hyperparam type: {type(h)} (expected LayerHyper or dict)")
+
 
 
 @dataclass
@@ -43,16 +64,17 @@ def build_optimizer(
 
     groups = []
 
-    def add_group(name: str, params: List[nn.Parameter]):
-        h = layerwise[name]
+    def add_group(name: str, params: list[nn.Parameter], h: Any) -> None:
+        h = _as_layer_hyper(h)
+
         groups.append(
             {
+                "name": name,
                 "params": params,
                 "lr": float(h.lr),
-                "momentum": float(momentum_start),  # updated per epoch
-                "weight_decay": float(h.weight_decay),
+                "momentum": float(momentum_start),
                 "_momentum_target": float(h.momentum_target),
-                "_name": name,
+                "weight_decay": float(h.weight_decay),
             }
         )
 
