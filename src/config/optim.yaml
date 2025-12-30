@@ -1,9 +1,9 @@
 optim:
   name: "sgd"
-  batch_size: 64
-  lr_decay: 0.993                # multiplicative decay per epoch (exponential schedule)
+  batch_size: 128
+  lr_decay: 0.985                # multiplicative decay per epoch (exponential schedule)
   momentum_start: 0.5
-  momentum_ramp_epochs: 20      # linear ramp from momentum_start to momentum_target
+  momentum_ramp_epochs: 50      # linear ramp from momentum_start to momentum_target
   # Layer-wise hyperparameters (eta_j, mu_j, lambda_j)
   # If you do not want layer-wise control, set all lrs/momentums/weight_decays equal.
   layerwise:

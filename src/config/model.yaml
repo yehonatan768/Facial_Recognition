@@ -3,6 +3,8 @@ model:
     channels: 1          # the original network uses 1 channel (binary images). Use 3 if your data is RGB.
     size: 105            # expected square side length; not enforced inside the model
   encoder:
+    use_leaky_relu: true
+    leaky_slope: 0.10
     conv1_out: 64
     conv1_kernel: 10
     conv2_out: 128

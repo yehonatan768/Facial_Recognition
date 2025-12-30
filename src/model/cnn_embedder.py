@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Tuple
 
 import torch
 import torch.nn as nn
@@ -22,17 +21,23 @@ class ConvEmbeddingConfig:
     pool_stride: int = 2
     fc_out: int = 4096
 
+    # NEW: activation control
+    # If you want strict paper behavior later, set use_leaky_relu=False.
+    use_leaky_relu: bool = True
+    leaky_slope: float = 0.10
+
 
 class ConvEmbeddingNet(nn.Module):
     """Twin-network embedding extractor.
 
-    Architecture (as used in the original one-shot Siamese network):
+    Paper structure (Figure 4):
       Conv -> ReLU -> MaxPool
       Conv -> ReLU -> MaxPool
       Conv -> ReLU -> MaxPool
       Conv -> ReLU
       Flatten
       FC -> Sigmoid  (embedding vector)
+    This implementation keeps the same structure, but optionally uses LeakyReLU.
     """
 
     def __init__(self, cfg: ConvEmbeddingConfig):
@@ -44,7 +49,11 @@ class ConvEmbeddingNet(nn.Module):
         self.conv3 = nn.Conv2d(cfg.conv2_out, cfg.conv3_out, kernel_size=cfg.conv3_kernel, stride=1, padding=0)
         self.conv4 = nn.Conv2d(cfg.conv3_out, cfg.conv4_out, kernel_size=cfg.conv4_kernel, stride=1, padding=0)
 
-        self.relu = nn.ReLU(inplace=True)
+        if cfg.use_leaky_relu:
+            self.act = nn.LeakyReLU(negative_slope=float(cfg.leaky_slope), inplace=True)
+        else:
+            self.act = nn.ReLU(inplace=True)
+
         self.pool = nn.MaxPool2d(kernel_size=cfg.pool_kernel, stride=cfg.pool_stride)
 
         # FC input dimension depends on input size; we infer on first forward.
@@ -56,15 +65,13 @@ class ConvEmbeddingNet(nn.Module):
         if self._fc_in is not None:
             return
         self._fc_in = int(x.shape[1])
-
-        # Create the FC layer on the same device/dtype as x
         self.fc = nn.Linear(self._fc_in, self.cfg.fc_out).to(device=x.device, dtype=x.dtype)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.pool(self.relu(self.conv1(x)))
-        x = self.pool(self.relu(self.conv2(x)))
-        x = self.pool(self.relu(self.conv3(x)))
-        x = self.relu(self.conv4(x))
+        x = self.pool(self.act(self.conv1(x)))
+        x = self.pool(self.act(self.conv2(x)))
+        x = self.pool(self.act(self.conv3(x)))
+        x = self.act(self.conv4(x))
         x = torch.flatten(x, start_dim=1)
         self._ensure_fc(x)
         x = self.sigmoid(self.fc(x))
