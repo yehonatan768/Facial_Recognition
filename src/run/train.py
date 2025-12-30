@@ -229,7 +229,7 @@ def main() -> None:
     model_cfg = cfg.get("model", {}) or {}
     tr_cfg = cfg.get("transform", {}) or {}
 
-    # Backward compatible: if your YAML still uses enforce_105, map it.
+    # Backward compatible mapping
     enforce_input_size = bool(model_cfg.get("enforce_input_size", model_cfg.get("enforce_105", True)))
 
     model = SiameseModel(
@@ -238,13 +238,21 @@ def main() -> None:
         enforce_input_size=enforce_input_size,
         embedding_dim=int(model_cfg.get("embedding_dim", 4096)),
 
-        # optional but recommended to expose:
         activation=str(model_cfg.get("activation", "leaky_relu")),
         embed_activation=str(model_cfg.get("embed_activation", "none")),
         l2_normalize=bool(model_cfg.get("l2_normalize", True)),
         l2_eps=float(model_cfg.get("l2_eps", 1e-12)),
         dropout_p=float(model_cfg.get("dropout_p", 0.0)),
     ).to(device)
+
+    logger.info(
+        f"[Model] in_channels={model_cfg.get('in_channels', 1)} "
+        f"input_size={tr_cfg.get('input_size', 105)} "
+        f"embedding_dim={model_cfg.get('embedding_dim', 4096)} "
+        f"embed_activation={model_cfg.get('embed_activation', 'none')} "
+        f"l2_normalize={model_cfg.get('l2_normalize', True)} "
+        f"dropout_p={model_cfg.get('dropout_p', 0.0)}"
+    )
 
     init_weights_like_paper(model)
 

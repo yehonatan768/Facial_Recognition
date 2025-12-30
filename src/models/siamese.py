@@ -16,6 +16,8 @@ class SiameseModel(nn.Module):
         input_size: int = 105,
         enforce_input_size: bool = True,
         embedding_dim: int = 4096,
+
+        # Encoder knobs (forwarded to CNNEncoder)
         activation: str = "leaky_relu",
         embed_activation: str = "none",
         l2_normalize: bool = True,
