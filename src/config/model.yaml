@@ -1,0 +1,18 @@
+model:
+  input:
+    channels: 1          # the original network uses 1 channel (binary images). Use 3 if your data is RGB.
+    size: 105            # expected square side length; not enforced inside the model
+  encoder:
+    conv1_out: 64
+    conv1_kernel: 10
+    conv2_out: 128
+    conv2_kernel: 7
+    conv3_out: 128
+    conv3_kernel: 4
+    conv4_out: 256
+    conv4_kernel: 4
+    pool_kernel: 2
+    pool_stride: 2
+    fc_out: 4096
+  head:
+    use_bias: false      # the similarity head in the paper is weight-only on |h1-h2|

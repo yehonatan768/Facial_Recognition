@@ -5,70 +5,39 @@ from typing import Optional
 
 
 @dataclass
-class EarlyStopState:
-    best_score: float
-    best_epoch: int
-    bad_epochs: int
-    should_stop: bool
+class EarlyStopper:
+    monitor: str
+    mode: str = "max"  # "max" or "min"
+    patience: int = 20
+    min_delta: float = 0.0
 
+    best_value: Optional[float] = None
+    best_epoch: int = -1
+    bad_epochs: int = 0
 
-class EarlyStopping:
-    """
-    Early stopping with patience.
+    def update(self, value: float, epoch: int) -> bool:
+        """Return True if should stop."""
+        value = float(value)
 
-    Use case (paper-like):
-      - monitor one-shot validation accuracy (maximize)
-      - stop when it does not improve for `patience` epochs (paper uses 20)
-
-    Call `update(epoch, score)` once per epoch after evaluation.
-    """
-
-    def __init__(self, patience: int = 20, min_delta: float = 0.0, maximize: bool = True):
-        self.patience = int(patience)
-        self.min_delta = float(min_delta)
-        self.maximize = bool(maximize)
-
-        self.best_score: Optional[float] = None
-        self.best_epoch: int = -1
-        self.bad_epochs: int = 0
-        self.should_stop: bool = False
-
-    def update(self, epoch: int, score: float) -> EarlyStopState:
-        """
-        epoch: current epoch index (0-based or 1-based; just be consistent)
-        score: metric value; higher is better if maximize=True else lower is better
-        """
-        score = float(score)
-
-        if self.best_score is None:
-            self.best_score = score
-            self.best_epoch = int(epoch)
+        if self.best_value is None:
+            self.best_value = value
+            self.best_epoch = epoch
             self.bad_epochs = 0
-            self.should_stop = False
-            return self.state()
+            return False
 
         improved = False
-        if self.maximize:
-            improved = score > (self.best_score + self.min_delta)
+        if self.mode == "max":
+            improved = value > (self.best_value + self.min_delta)
+        elif self.mode == "min":
+            improved = value < (self.best_value - self.min_delta)
         else:
-            improved = score < (self.best_score - self.min_delta)
+            raise ValueError("mode must be 'max' or 'min'")
 
         if improved:
-            self.best_score = score
-            self.best_epoch = int(epoch)
+            self.best_value = value
+            self.best_epoch = epoch
             self.bad_epochs = 0
-            self.should_stop = False
         else:
             self.bad_epochs += 1
-            if self.bad_epochs >= self.patience:
-                self.should_stop = True
 
-        return self.state()
-
-    def state(self) -> EarlyStopState:
-        return EarlyStopState(
-            best_score=float(self.best_score) if self.best_score is not None else float("nan"),
-            best_epoch=int(self.best_epoch),
-            bad_epochs=int(self.bad_epochs),
-            should_stop=bool(self.should_stop),
-        )
+        return self.bad_epochs >= self.patience

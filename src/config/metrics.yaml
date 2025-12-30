@@ -1,0 +1,3 @@
+metrics:
+  threshold: 0.5                 # classification threshold for pair verification metrics
+  compute_auc: false             # AUC uses a numpy implementation; set true if you want it

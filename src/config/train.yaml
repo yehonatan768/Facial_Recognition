@@ -1,0 +1,22 @@
+train:
+  device: "cuda"                 # "cuda" | "cpu"
+  epochs: 200
+  seed: 42
+
+  # If paths.pairs_val is empty, we split train pairs into train/val using identity-safe component splitting.
+  split:
+    val_ratio: 0.2
+    target_pos_frac: 0.5
+    min_val_identities: 30
+    seed: 42
+
+  early_stop:
+    enabled: true
+    monitor: "val_accuracy"      # any metric key produced by training/metrics.py
+    mode: "max"                  # "max" or "min"
+    patience: 20
+    min_delta: 0.0
+
+  checkpoints:
+    save_best_only: true
+    metric: "val_accuracy"
