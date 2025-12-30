@@ -69,18 +69,25 @@ def build_transform_from_config(cfg: Dict[str, Any], train: bool) -> transforms.
 
     ops: List[Any] = []
 
+    # -------------------------
     # Base crop/resize (shared)
-    ops.append(CenterCropMinSide())
-    ops.append(transforms.Resize((input_size, input_size)))
-
-    # Optional: advanced face mask (your custom pipeline)
+    # -------------------------
+    # CenterCropMinSide requires 'ratio'. We use:
+    # - advanced.pre_crop_ratio when in advanced mode
+    # - otherwise 1.0 (no extra zoom; just square by min-side)
+    crop_ratio = 1.0
     if mode == "advanced":
         adv = cfg.get("advanced", {}) or {}
-        pre_crop_ratio = float(adv.get("pre_crop_ratio", 1.0))
-        if 0.0 < pre_crop_ratio < 1.0:
-            ops.append(transforms.CenterCrop(int(round(input_size * pre_crop_ratio))))
-            ops.append(transforms.Resize((input_size, input_size)))
+        crop_ratio = float(adv.get("pre_crop_ratio", 1.0))
 
+    ops.append(CenterCropMinSide(ratio=crop_ratio))
+    ops.append(transforms.Resize((input_size, input_size)))
+
+    # -------------------------
+    # Advanced pipeline (FACE MASK)
+    # -------------------------
+    if mode == "advanced":
+        adv = cfg.get("advanced", {}) or {}
         fm = (adv.get("face_mask", {}) or {})
         ops.append(
             EllipseFaceMask(
@@ -91,7 +98,9 @@ def build_transform_from_config(cfg: Dict[str, Any], train: bool) -> transforms.
             )
         )
 
+    # -------------------------
     # Deterministic filters (train/val/test)
+    # -------------------------
     eq = build_equalize_from_cfg(cfg)
     if eq is not None:
         ops.append(eq)
@@ -100,7 +109,9 @@ def build_transform_from_config(cfg: Dict[str, Any], train: bool) -> transforms.
     if ed is not None:
         ops.append(ed)
 
+    # -------------------------
     # Train-only augmentations
+    # -------------------------
     if train:
         aug = cfg.get("augment", {}) or {}
 
@@ -131,17 +142,23 @@ def build_transform_from_config(cfg: Dict[str, Any], train: bool) -> transforms.
             # RandomErasing is tensor-based, so we append after ToTensor below
             pass
 
-    # Enforce channel mode to match the model (filters may change modes).
+    # -------------------------
+    # Enforce channel mode to match the model
+    # -------------------------
     if in_channels == 1:
         ops.append(transforms.Grayscale(num_output_channels=1))
     else:
         ops.append(transforms.Lambda(lambda im: im.convert("RGB")))
 
+    # -------------------------
     # Tensor + normalize
+    # -------------------------
     ops.append(transforms.ToTensor())
     ops.append(transforms.Normalize(mean=mean, std=std))
 
+    # -------------------------
     # Random erasing (train-only, tensor op)
+    # -------------------------
     if train:
         re = (cfg.get("augment", {}) or {}).get("random_erasing", {}) or {}
         if bool(re.get("enabled", False)):
