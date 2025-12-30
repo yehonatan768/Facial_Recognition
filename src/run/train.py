@@ -151,18 +151,26 @@ def main() -> None:
     )
 
     # -------------------------
-    # Early stop on val_loss
+    # Early stop (monitor/mode from config)
     # -------------------------
-    es_cfg = cfg.get("train", {}).get("early_stop", {})
+    es_cfg = cfg.get("train", {}).get("early_stop", {}) or {}
+    monitor = str(es_cfg.get("monitor", "val_loss"))
+    mode = str(es_cfg.get("mode", "min"))
+    patience = int(es_cfg.get("patience", 20))
+    min_delta = float(es_cfg.get("min_delta", 0.0))
+
     early = EarlyStopper(
-        monitor="val_loss",
-        mode="min",
-        patience=int(es_cfg.get("patience", 20)),
-        min_delta=float(es_cfg.get("min_delta", 0.0)),
+        monitor=monitor,
+        mode=mode,
+        patience=patience,
+        min_delta=min_delta,
     )
 
+    # -------------------------
+    # Best checkpoint ALWAYS by val_accuracy (per your requirement)
+    # -------------------------
     best_path = run_dir / "best.pt"
-    best_val = float("inf")
+    best_val_acc = float("-inf")
     best_epoch = 0
 
     max_epochs = int(cfg.get("train", {}).get("max_epochs", 200))
@@ -173,40 +181,74 @@ def main() -> None:
         "val_loss": [],
         "train_accuracy": [],
         "val_accuracy": [],
+        "lr": [],
+        "momentum": [],
     }
 
     for epoch in range(max_epochs):
         tr_loss, tr_acc = train_one_epoch(model, train_loader, state.optimizer, device)
         va_loss, va_acc = eval_one_epoch(model, val_loader, device)
 
+        # step schedule once per epoch (updates lr and momentum in param groups)
         step_schedule(state, epoch)
+
+        lr0 = float(state.optimizer.param_groups[0]["lr"])
+        m0 = float(state.optimizer.param_groups[0].get("momentum", 0.0))
 
         history["epoch"].append(epoch + 1)
         history["train_loss"].append(float(tr_loss))
         history["val_loss"].append(float(va_loss))
         history["train_accuracy"].append(float(tr_acc))
         history["val_accuracy"].append(float(va_acc))
+        history["lr"].append(lr0)
+        history["momentum"].append(m0)
 
         logger.info(
-            "Epoch %03d/%03d | loss: train=%.6f val=%.6f | acc: train=%.4f val=%.4f",
+            "Epoch %03d/%03d | loss: train=%.6f val=%.6f | acc: train=%.4f val=%.4f | lr=%.8f m=%.4f",
             epoch + 1,
             max_epochs,
             tr_loss,
             va_loss,
             tr_acc,
             va_acc,
+            lr0,
+            m0,
         )
 
-        if float(va_loss) < best_val:
-            best_val = float(va_loss)
+        # Best checkpoint always by highest val_accuracy
+        if float(va_acc) > best_val_acc:
+            best_val_acc = float(va_acc)
             best_epoch = epoch + 1
-            torch.save({"model": model.state_dict(), "epoch": best_epoch, "val_loss": best_val}, best_path)
+            torch.save(
+                {
+                    "model": model.state_dict(),
+                    "epoch": best_epoch,
+                    "val_accuracy": best_val_acc,
+                    "val_loss": float(va_loss),
+                },
+                best_path,
+            )
 
-        if early.update(float(va_loss), epoch + 1):
+        # Early stop should use the configured monitor
+        # Map monitor name -> current value
+        monitor_map = {
+            "train_loss": float(tr_loss),
+            "val_loss": float(va_loss),
+            "train_accuracy": float(tr_acc),
+            "val_accuracy": float(va_acc),
+        }
+        if monitor not in monitor_map:
+            raise ValueError(
+                f"Unsupported early_stop.monitor={monitor!r}. "
+                f"Choose one of: {sorted(monitor_map.keys())}"
+            )
+
+        if early.update(monitor_map[monitor], epoch + 1):
             logger.info(
-                "Early stopping at epoch %d (best epoch=%d best_val_loss=%.6f)",
+                "Early stopping at epoch %d (best epoch=%d best %s=%.6f)",
                 epoch + 1,
                 early.best_epoch,
+                monitor,
                 float(early.best_value),
             )
             break
@@ -219,10 +261,14 @@ def main() -> None:
     except Exception:
         pass
 
-    save_json(run_dir / "results.json", {"best_epoch": best_epoch, "best_val_loss": best_val})
+    save_json(
+        run_dir / "results.json",
+        {"best_epoch": best_epoch, "best_val_accuracy": best_val_acc},
+    )
 
     plot_loss_curves(history, run_dir / "plots")
-    logger.info("Done. Best epoch=%d | best_val_loss=%.6f", best_epoch, best_val)
+    logger.info("Done. Best epoch=%d | best_val_accuracy=%.6f", best_epoch, best_val_acc)
+
 
 
 if __name__ == "__main__":
