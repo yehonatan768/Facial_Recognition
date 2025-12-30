@@ -1,0 +1,6 @@
+transform:
+  size: 105
+  to_grayscale: true
+  normalize: false
+  mean: 0.5
+  std: 0.5
