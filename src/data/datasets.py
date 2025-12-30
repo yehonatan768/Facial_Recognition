@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 
 import math
 import torch
@@ -90,17 +90,28 @@ def build_dataloaders(
     train_pairs: List[Pair],
     val_pairs: List[Pair],
     *,
+    train_transform=None,
+    eval_transform=None,
     num_workers: int = 2,
     pin_memory: bool = True,
 ) -> Tuple[DataLoader, DataLoader]:
-    transform = build_transform(cfg)
+    """
+    Build DataLoaders with an explicit train/eval transform split.
+
+    - If train_transform/eval_transform are provided, they are used directly.
+    - Otherwise, defaults to build_transform(cfg, train=True/False).
+    """
+    if train_transform is None:
+        train_transform = build_transform(cfg, train=True)
+    if eval_transform is None:
+        eval_transform = build_transform(cfg, train=False)
 
     bs = int(cfg.get("optim", {}).get("batch_size", 128))
 
-    train_ds = PairPathDataset(train_pairs, transform=transform)
-    val_ds = PairPathDataset(val_pairs, transform=transform)
+    train_ds = PairPathDataset(train_pairs, transform=train_transform)
+    val_ds = PairPathDataset(val_pairs, transform=eval_transform)
 
-    # NO shuffle sampler
+    # NO shuffle sampler (balanced batches)
     sampler = BalancedPairBatchSampler(train_pairs, batch_size=bs)
 
     train_loader = DataLoader(
@@ -112,7 +123,7 @@ def build_dataloaders(
     val_loader = DataLoader(
         val_ds,
         batch_size=bs,
-        shuffle=False,  # already no shuffle
+        shuffle=False,
         num_workers=num_workers,
         pin_memory=pin_memory,
     )
