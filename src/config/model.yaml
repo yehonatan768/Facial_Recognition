@@ -18,6 +18,6 @@ model:
     conv4_kernel: 4
     pool_kernel: 2
     pool_stride: 2
-    fc_out: 4096
+    fc_out: 1024
   head:
     use_bias: false      # the similarity head in the paper is weight-only on |h1-h2|
