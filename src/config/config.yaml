@@ -193,5 +193,5 @@ early_stop:
   # So monitor val_acc (threshold=0.5), not best-threshold metrics.
   monitor: val_acc
   mode: max
-  patience: 12
+  patience: 30
   min_delta: 0.002
