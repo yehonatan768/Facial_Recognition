@@ -1,0 +1,186 @@
+# =========================
+# Paths
+# =========================
+paths:
+  project_root: ""
+  images_root: images
+  pairs_train: assets/pairsDevTrain.txt
+  pairs_test: assets/pairsDevTest.txt
+
+# =========================
+# Split strategy
+# =========================
+split:
+  val_ratio: 0.30
+  target_pos_frac: 0.50
+  min_val_identities: 30
+  seed: 42
+
+# =========================
+# Model
+# =========================
+model:
+  # Options: paper_cnn | resnet18
+  encoder: resnet18
+
+  # IMPORTANT for pretrained ResNet: use RGB
+  in_channels: 3
+
+  # Embedding size: 256 is OK; 512 often improves separability
+  embedding_dim: 512
+
+  enforce_input_size: true
+
+  # For ResNet encoder this mainly affects non-resnet parts
+  activation: relu
+
+  # For metric embeddings with L2 normalization: keep "none"
+  embed_activation: none
+
+  # L2-normalized embeddings usually help verification
+  l2_normalize: true
+  l2_eps: 1.0e-12
+
+  # Mild dropout for small datasets (too much hurts)
+  dropout_p: 0.10
+
+  # ResNet options
+  resnet_pretrained: true
+
+  # DO NOT keep it frozen forever — warm up head then fine-tune
+  resnet_freeze_backbone: true
+  resnet_freeze_backbone_epochs: 5
+
+# =========================
+# Optimization
+# =========================
+optim:
+  optimizer: adamw
+
+  # Head/projection LR
+  lr: 0.0002
+
+  # Layer-wise learning rates (recommended)
+  # Backbone LR should be ~10x smaller than head for stable fine-tuning
+  lr_conv: 0.00002
+  lr_fc: 0.0002
+  lr_alpha: 0.0002
+
+  # Weight decay: modest for ResNet fine-tuning
+  weight_decay: 0.0001
+  weight_decay_conv: 0.00005
+  weight_decay_fc: 0.0001
+  weight_decay_alpha: 0.0
+
+# =========================
+# Data
+# =========================
+data:
+  image_ext: .jpg
+  strict_exists: true
+
+# =========================
+# Pipeline
+# =========================
+pipeline:
+  mode: advanced  # paper | advanced
+
+# =========================
+# Transform (shared)
+# =========================
+transform:
+  input_size: 160
+
+  # IMPORTANT for pretrained ResNet: ImageNet normalization
+  mean: [0.485, 0.456, 0.406]
+  std:  [0.229, 0.224, 0.225]
+
+# =========================
+# Deterministic filters (train/val/test)
+# =========================
+# For pretrained ResNet, these usually hurt (distribution shift).
+filters:
+  equalize:
+    enabled: false
+    method: autocontrast
+    autocontrast_cutoff: 1.0
+    autocontrast_ignore: null
+    clahe_clip_limit: 2.0
+    clahe_tile_grid_size: 8
+
+  edge:
+    enabled: false
+    method: find_edges
+    mode: mix
+    alpha: 0.05
+    blur_radius: 0.1
+
+# =========================
+# Advanced pipeline (FACE MASK)
+# =========================
+advanced:
+  # Slightly looser crop helps robustness (acts like translation/scale aug)
+  pre_crop_ratio: 0.92
+
+  face_mask:
+    center: [0.0, 0.0]
+    axes: [0.78, 0.92]
+    edge_softness: 0.10
+    power: 1.0
+
+# =========================
+# Paper pipeline
+# =========================
+paper:
+  enable_jitter: true
+  jitter:
+    brightness: 0.15
+    contrast: 0.15
+    saturation: 0.15
+    hue: 0.01
+
+# =========================
+# Train-only augmentations
+# =========================
+augment:
+  hflip:
+    enabled: true
+    p: 0.5
+
+  # Keep rotation small for faces (large rotations reduce identity cues)
+  rotation:
+    enabled: true
+    degrees: 3.0
+
+  blur:
+    enabled: true
+    p: 0.10
+    kernel_size: 3
+    sigma: [0.2, 0.8]
+
+  # Erasing can help, but too much can hurt; keep modest
+  random_erasing:
+    enabled: true
+    p: 0.05
+    scale: [0.02, 0.06]
+    ratio: [0.3, 3.3]
+    value: 0.0
+
+# =========================
+# Training
+# =========================
+train:
+  seed: 42
+  epochs: 200
+  batch_size: 64
+  dump_every: 10
+
+# =========================
+# Early stopping
+# =========================
+early_stop:
+  enabled: true
+  monitor: val_best_thr_acc
+  mode: max
+  patience: 25
+  min_delta: 0.001
