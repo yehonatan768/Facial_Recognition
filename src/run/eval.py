@@ -84,7 +84,7 @@ def main() -> None:
 
     transform = build_transform(cfg)
     bs = int(cfg.get("optim", {}).get("batch_size", 128))
-    train_loader = DataLoader(PairPathDataset(all_pairs, transform=transform), batch_size=bs, shuffle=True, num_workers=2, pin_memory=True)
+    train_loader = DataLoader(PairPathDataset(all_pairs, transform=transform), batch_size=bs, shuffle=False, num_workers=2, pin_memory=True)
     test_loader = DataLoader(PairPathDataset(test_pairs, transform=transform), batch_size=bs, shuffle=False, num_workers=2, pin_memory=True)
 
     # Model

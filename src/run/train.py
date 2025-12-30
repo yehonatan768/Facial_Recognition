@@ -178,6 +178,10 @@ def main() -> None:
 
         tr_loss, tr_m = train_one_epoch(model, train_loader, device, opt, metrics_cfg)
         va_loss, va_m = eval_one_epoch(model, val_loader, device, metrics_cfg)
+        tr_m = dict(tr_m)
+        va_m = dict(va_m)
+        tr_m["loss"] = float(tr_loss)
+        va_m["loss"] = float(va_loss)
 
         # log
         logger.info(
