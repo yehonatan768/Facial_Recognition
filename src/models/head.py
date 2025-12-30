@@ -33,13 +33,13 @@ class WeightedL1Head(nn.Module):
         self.alpha = nn.Linear(self.embedding_dim, 1, bias=False)
 
 
-    def forward(self, h1: torch.Tensor, h2: torch.Tensor) -> torch.Tensor:
+    def logits(self, h1: torch.Tensor, h2: torch.Tensor) -> torch.Tensor:
         """
         Args:
           h1, h2: (B, D) embeddings from the shared CNN encoder (D=4096 in paper)
 
         Returns:
-          p_same: (B, 1) probability that the pair is from the same class
+          logits: (B, 1) pre-sigmoid score
         """
         if h1.shape != h2.shape:
             raise ValueError(f"h1 and h2 must have the same shape. Got {tuple(h1.shape)} vs {tuple(h2.shape)}")
@@ -53,8 +53,11 @@ class WeightedL1Head(nn.Module):
 
         d = torch.abs(h1 - h2)       # (B, D)
         s = self.alpha(d)            # (B, 1)
-        p = torch.sigmoid(s)         # (B, 1)
-        return p
+        return s
+
+    def forward(self, h1: torch.Tensor, h2: torch.Tensor) -> torch.Tensor:
+        """Returns p_same = sigmoid(logits)."""
+        return torch.sigmoid(self.logits(h1, h2))
 
     def raw_score(self, h1: torch.Tensor, h2: torch.Tensor) -> torch.Tensor:
         """
@@ -63,8 +66,7 @@ class WeightedL1Head(nn.Module):
         """
         if h1.shape != h2.shape:
             raise ValueError(f"h1 and h2 must have the same shape. Got {tuple(h1.shape)} vs {tuple(h2.shape)}")
-        d = torch.abs(h1 - h2)
-        return self.alpha(d)
+        return self.logits(h1, h2)
 
 
 if __name__ == "__main__":

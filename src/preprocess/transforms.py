@@ -56,6 +56,35 @@ def build_transform_from_config(cfg: Dict[str, Any], train: bool) -> transforms.
         )
     )
 
+    # 3.5) train-only augmentations (applied on PIL image before tensor conversion)
+    if train:
+        aug = (cfg.get("augment", {}) or {})
+
+        # Horizontal flip
+        hf = (aug.get("hflip", {}) or {})
+        if bool(hf.get("enabled", False)):
+            ops.append(transforms.RandomHorizontalFlip(p=float(hf.get("p", 0.5))))
+
+        # Small rotations (helps pose variation)
+        rot = (aug.get("rotation", {}) or {})
+        if bool(rot.get("enabled", False)):
+            ops.append(transforms.RandomRotation(degrees=float(rot.get("degrees", 5.0))))
+
+        # Mild blur
+        bl = (aug.get("blur", {}) or {})
+        if bool(bl.get("enabled", False)):
+            ops.append(
+                transforms.RandomApply(
+                    [
+                        transforms.GaussianBlur(
+                            kernel_size=int(bl.get("kernel_size", 3)),
+                            sigma=tuple(bl.get("sigma", [0.3, 1.0])),
+                        )
+                    ],
+                    p=float(bl.get("p", 0.15)),
+                )
+            )
+
     # 4) final format (applied once)
     ops.extend(
         [
@@ -65,5 +94,18 @@ def build_transform_from_config(cfg: Dict[str, Any], train: bool) -> transforms.
             transforms.Normalize(mean=[mean], std=[std]),
         ]
     )
+
+    # Tensor-level train-only aug (after normalize)
+    if train:
+        re = (cfg.get("augment", {}) or {}).get("random_erasing", {}) or {}
+        if bool(re.get("enabled", False)):
+            ops.append(
+                transforms.RandomErasing(
+                    p=float(re.get("p", 0.1)),
+                    scale=tuple(re.get("scale", [0.02, 0.08])),
+                    ratio=tuple(re.get("ratio", [0.3, 3.3])),
+                    value=float(re.get("value", 0.0)),
+                )
+            )
 
     return transforms.Compose(ops)

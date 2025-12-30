@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 from torch.utils.data import Dataset, DataLoader
+from torch.utils.data.sampler import Sampler
 from PIL import Image
 
 from src.data.load_data import load_image_rgb  # loads PIL RGB; transform converts to grayscale
@@ -112,6 +113,62 @@ def make_loader(
     )
 
 
+class BalancedPairBatchSampler(Sampler[list[int]]):
+    """Yields batches with an (approximately) 50/50 pos/neg label mix.
+
+    This is often critical for stable optimization in Siamese BCE training,
+    especially when you introduce hard-negative mining or aggressive augmentation.
+    """
+
+    def __init__(self, pairs: List[Pair], batch_size: int, seed: int = 42):
+        if batch_size < 2:
+            raise ValueError("batch_size must be >= 2")
+        self.batch_size = int(batch_size)
+        self.half = self.batch_size // 2
+
+        self.pos_idx = [i for i, (_, _, y) in enumerate(pairs) if int(y) == 1]
+        self.neg_idx = [i for i, (_, _, y) in enumerate(pairs) if int(y) == 0]
+        if len(self.pos_idx) == 0 or len(self.neg_idx) == 0:
+            raise ValueError("BalancedPairBatchSampler requires both positive and negative pairs")
+
+        self.seed = int(seed)
+
+    def __iter__(self):
+        g = torch.Generator()
+        g.manual_seed(self.seed)
+
+        pos = torch.tensor(self.pos_idx)
+        neg = torch.tensor(self.neg_idx)
+
+        pos = pos[torch.randperm(len(pos), generator=g)]
+        neg = neg[torch.randperm(len(neg), generator=g)]
+
+        # cycle shorter list
+        p_ptr = 0
+        n_ptr = 0
+        n_batches = (len(pos) + len(neg)) // self.batch_size
+        for _ in range(max(1, n_batches)):
+            p_take = self.half
+            n_take = self.batch_size - p_take
+
+            if p_ptr + p_take > len(pos):
+                pos = pos[torch.randperm(len(pos), generator=g)]
+                p_ptr = 0
+            if n_ptr + n_take > len(neg):
+                neg = neg[torch.randperm(len(neg), generator=g)]
+                n_ptr = 0
+
+            batch = torch.cat([pos[p_ptr : p_ptr + p_take], neg[n_ptr : n_ptr + n_take]], dim=0)
+            batch = batch[torch.randperm(len(batch), generator=g)]
+            p_ptr += p_take
+            n_ptr += n_take
+            yield batch.tolist()
+
+    def __len__(self) -> int:
+        # approximate
+        return max(1, (len(self.pos_idx) + len(self.neg_idx)) // self.batch_size)
+
+
 def build_pair_loaders(
     cfg: Dict[str, Any],
     train_pairs: List[Pair],
@@ -126,19 +183,29 @@ def build_pair_loaders(
     train_ds = PairsPathDataset(train_pairs, transform=train_t, strict_exists=False)
     val_ds   = PairsPathDataset(val_pairs,   transform=eval_t,  strict_exists=False)
 
-    # FULL-BATCH: one batch per epoch
-    train_loader = make_loader(
-        train_ds,
-        batch_size=int(cfg["train"]["batch_size"]),  # e.g. 128
-        shuffle=False,  # deterministic
-        num_workers=num_workers,
-        pin_memory=pin_memory,
-        drop_last=False,
-    )
+    bs = int(cfg["train"]["batch_size"])
+    use_balanced_batches = bool(cfg.get("train", {}).get("balanced_batches", True))
+    if use_balanced_batches:
+        sampler = BalancedPairBatchSampler(train_pairs, batch_size=bs, seed=int(cfg.get("train", {}).get("seed", 42)))
+        train_loader = DataLoader(
+            train_ds,
+            batch_sampler=sampler,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+        )
+    else:
+        train_loader = make_loader(
+            train_ds,
+            batch_size=bs,
+            shuffle=True,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            drop_last=True,
+        )
 
     val_loader = make_loader(
         val_ds,
-        batch_size=int(cfg["train"]["batch_size"]),  # or separate val_batch_size
+        batch_size=int(cfg.get("train", {}).get("val_batch_size", bs)),
         shuffle=False,
         num_workers=num_workers,
         pin_memory=pin_memory,

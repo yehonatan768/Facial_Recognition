@@ -20,25 +20,41 @@ split:
 # Model
 # =========================
 model:
+  # Use a stronger encoder to push accuracy >80% on small datasets.
+  # Options: paper_cnn | resnet18
+  encoder: resnet18
   in_channels: 1
-  embedding_dim: 1024          # try 1024 for better generalization
+  embedding_dim: 256           # 256-512 works well with L2 normalization
   enforce_input_size: true     # or keep enforce_105; train.py maps it
 
   activation: leaky_relu       # or relu
   embed_activation: none       # for L2 embeddings; "sigmoid" for strict paper
   l2_normalize: true
   l2_eps: 1e-12
-  dropout_p: 0.3               # 0.2-0.4 often helps; start 0.3
+  dropout_p: 0.15              # smaller for pretrained backbone
+
+  # ResNet encoder controls
+  resnet_pretrained: true
+  resnet_freeze_backbone: false
+  resnet_freeze_backbone_epochs: 5
+
+  # ResNet options
+  resnet_pretrained: true
+  resnet_freeze_backbone: true
+  resnet_freeze_backbone_epochs: 5
 
 # =========================
 # Optimization
 # =========================
 optim:
-  lr: 0.002
-  lr_decay: 0.99
-  momentum_start: 0.6
-  momentum_final: 0.9
-  momentum_ramp_epochs: 60
+  # For pretrained backbones, AdamW typically converges faster and more stably.
+  optimizer: adamw
+  lr: 0.0002
+
+  # Optional layer-wise learning rates
+  lr_conv: 0.00005     # backbone
+  lr_fc: 0.0002        # projection
+  lr_alpha: 0.0002     # head
 
   weight_decay: 0.0001
   weight_decay_conv: 0.00005
@@ -62,7 +78,7 @@ pipeline:
 # Transform (shared)
 # =========================
 transform:
-  input_size: 105
+  input_size: 160
   mean: 0.5
   std: 0.5
 
@@ -127,8 +143,8 @@ augment:
 
   random_erasing:
     enabled: true
-    p: 0.15
-    scale: [ 0.02, 0.10 ]
+    p: 0.10
+    scale: [0.02, 0.08]
     ratio: [0.3, 3.3]
     value: 0.0
 
@@ -147,7 +163,7 @@ train:
 # =========================
 early_stop:
   enabled: true
-  monitor: val_loss
-  mode: min
-  patience: 20
+  monitor: val_best_thr_acc
+  mode: max
+  patience: 25
   min_delta: 0.0

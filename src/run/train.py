@@ -122,12 +122,16 @@ def _save_ckpt(
     )
 
 
-def _get_monitor_score(monitor: str, val_loss: float, val_acc: float) -> float:
+def _get_monitor_score(monitor: str, val_loss: float, val_acc: float, val_best_thr_acc: float) -> float:
     if monitor == "val_acc":
         return float(val_acc)
+    if monitor == "val_best_thr_acc":
+        return float(val_best_thr_acc)
     if monitor == "val_loss":
         return float(val_loss)
-    raise ValueError(f"Unsupported early_stop.monitor={monitor!r}. Use 'val_loss' or 'val_acc'.")
+    raise ValueError(
+        f"Unsupported early_stop.monitor={monitor!r}. Use 'val_loss', 'val_acc', or 'val_best_thr_acc'."
+    )
 
 
 def _write_metrics_json(path: Path, payload: Dict[str, Any]) -> None:
@@ -185,6 +189,9 @@ def main() -> None:
         "val_loss": [],
         "train_acc": [],
         "val_acc": [],
+        "train_best_thr_acc": [],
+        "val_best_thr_acc": [],
+        "val_best_thr": [],
     }
 
     paths = _resolve_paths(cfg, args)
@@ -233,6 +240,7 @@ def main() -> None:
     enforce_input_size = bool(model_cfg.get("enforce_input_size", model_cfg.get("enforce_105", True)))
 
     model = SiameseModel(
+        encoder=str(model_cfg.get("encoder", "paper_cnn")),
         in_channels=int(model_cfg.get("in_channels", 1)),
         input_size=int(tr_cfg.get("input_size", 105)),
         enforce_input_size=enforce_input_size,
@@ -243,18 +251,31 @@ def main() -> None:
         l2_normalize=bool(model_cfg.get("l2_normalize", True)),
         l2_eps=float(model_cfg.get("l2_eps", 1e-12)),
         dropout_p=float(model_cfg.get("dropout_p", 0.0)),
+
+        resnet_pretrained=bool(model_cfg.get("resnet_pretrained", True)),
+        resnet_freeze_backbone=bool(model_cfg.get("resnet_freeze_backbone", False)),
     ).to(device)
 
     logger.info(
-        f"[Model] in_channels={model_cfg.get('in_channels', 1)} "
+        f"[Model] encoder={model_cfg.get('encoder', 'paper_cnn')} "
+        f"in_channels={model_cfg.get('in_channels', 1)} "
         f"input_size={tr_cfg.get('input_size', 105)} "
         f"embedding_dim={model_cfg.get('embedding_dim', 4096)} "
         f"embed_activation={model_cfg.get('embed_activation', 'none')} "
         f"l2_normalize={model_cfg.get('l2_normalize', True)} "
-        f"dropout_p={model_cfg.get('dropout_p', 0.0)}"
+        f"dropout_p={model_cfg.get('dropout_p', 0.0)} "
+        f"resnet_pretrained={model_cfg.get('resnet_pretrained', True)} "
+        f"resnet_freeze_backbone={model_cfg.get('resnet_freeze_backbone', False)}"
     )
 
-    init_weights_like_paper_encoder_only(model)
+    # IMPORTANT:
+    # - For the original paper CNN, apply the paper initialization.
+    # - For pretrained ResNet, do NOT overwrite backbone weights.
+    enc_name = str(model_cfg.get("encoder", "paper_cnn")).lower()
+    if enc_name in {"paper", "paper_cnn", "cnn", "koch"}:
+        init_weights_like_paper_encoder_only(model)
+    elif enc_name in {"resnet18", "resnet"} and not bool(model_cfg.get("resnet_pretrained", True)):
+        init_weights_like_paper_encoder_only(model)
 
     optim_bundle = build_optimizer_and_scheduler(model=model, cfg=cfg)
     optimizer = optim_bundle.optimizer
@@ -305,6 +326,12 @@ def main() -> None:
     # Training loop
     # =========================
     for epoch in range(start_epoch, epochs + 1):
+        # Optional: warm-start for pretrained ResNet (stabilizes training on small datasets)
+        if hasattr(model, "encoder") and hasattr(model.encoder, "set_backbone_trainable"):
+            freeze_epochs = int(model_cfg.get("resnet_freeze_backbone_epochs", 0) or 0)
+            if freeze_epochs > 0:
+                model.encoder.set_backbone_trainable(epoch > freeze_epochs)
+
         sched_info: Dict[str, float] = {}
         if scheduler is not None:
             sched_info = scheduler.step(epoch - 1)
@@ -329,25 +356,25 @@ def main() -> None:
         lr = float(sched_info.get("lr", optimizer.param_groups[0].get("lr", 0.0)))
         mom = float(sched_info.get("momentum", optimizer.param_groups[0].get("momentum", 0.0)))
 
-        monitor_score = _get_monitor_score(monitor, va_stats.loss, va_stats.acc)
+        monitor_score = _get_monitor_score(monitor, va_stats.loss, va_stats.acc, va_stats.best_thr_acc)
 
         logger.info(
             f"Epoch {epoch:03d}/{epochs:03d} | "
             f"train_loss={tr_stats.loss:.6f} val_loss={va_stats.loss:.6f} | "
             f"train_acc={tr_stats.acc:.4f} val_acc={va_stats.acc:.4f} | "
+            f"val_best_thr_acc={va_stats.best_thr_acc:.4f} thr={va_stats.best_thr:.3f} | "
             f"lr={lr:.8f} momentum={mom:.3f}"
         )
 
-        # ---- Save best only (by val_acc) ----
-        if va_stats.acc > best_val_acc:
-            best_val_acc = float(va_stats.acc)
+        # ---- Save best only (by monitor) ----
+        improved_ckpt = (monitor_score > best_monitor_score) if maximize else (monitor_score < best_monitor_score)
+        if improved_ckpt:
+            best_monitor_score = float(monitor_score)
+            best_val_acc = max(best_val_acc, float(va_stats.acc))
             best_epoch = int(epoch)
             _save_ckpt(ckpt_best, model, optimizer, epoch, best_monitor_score, best_val_acc, cfg)
 
-        # ---- Update monitor score for early stopping ----
-        improved = (monitor_score > best_monitor_score) if maximize else (monitor_score < best_monitor_score)
-        if improved:
-            best_monitor_score = float(monitor_score)
+        # ---- Early stopping looks at monitor_score directly ----
 
         # ---- Write metrics.json for plotting ----
         metrics["epoch"].append(int(epoch))
@@ -355,6 +382,9 @@ def main() -> None:
         metrics["val_loss"].append(float(va_stats.loss))
         metrics["train_acc"].append(float(tr_stats.acc))
         metrics["val_acc"].append(float(va_stats.acc))
+        metrics["train_best_thr_acc"].append(float(tr_stats.best_thr_acc))
+        metrics["val_best_thr_acc"].append(float(va_stats.best_thr_acc))
+        metrics["val_best_thr"].append(float(va_stats.best_thr))
         _write_metrics_json(metrics_path, metrics)
 
         if early.update(epoch=epoch, score=monitor_score).should_stop:

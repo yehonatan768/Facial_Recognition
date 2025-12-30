@@ -9,7 +9,7 @@ import torch
 @dataclass
 class OptimBundle:
     optimizer: torch.optim.Optimizer
-    scheduler: "PaperLrMomentumScheduler"
+    scheduler: Optional["PaperLrMomentumScheduler"]
 
 
 def _as_float_list(x: Union[float, Sequence[float]], n: int) -> list[float]:
@@ -92,6 +92,7 @@ def build_optimizer_and_scheduler(model: torch.nn.Module, cfg: Dict[str, Any]) -
       - Momentum ramps linearly from 0.5 to momentum_final over the schedule.
     """
     optim_cfg = cfg.get("optim", {}) or {}
+    optim_name = str(optim_cfg.get("optimizer", "sgd")).lower()
     train_cfg = cfg.get("train", {}) or {}
 
     # Accept both keys (your config currently uses lr_base)
@@ -126,37 +127,46 @@ def build_optimizer_and_scheduler(model: torch.nn.Module, cfg: Dict[str, Any]) -
     mu_fc = float(optim_cfg.get("momentum_final_fc", momentum_final))
     mu_alpha = float(optim_cfg.get("momentum_final_alpha", momentum_final))
 
-    # ---- Collect params by name ----
-    conv_params, fc_params, alpha_params = [], [], []
+    # ---- Collect params by role ----
+    backbone_params, proj_params, head_params = [], [], []
     for name, p in model.named_parameters():
         if not p.requires_grad:
             continue
-        if name.startswith("encoder.conv"):
-            conv_params.append(p)
-        elif name.startswith("encoder.fc"):
-            fc_params.append(p)
-        elif name.startswith("head.alpha"):
-            alpha_params.append(p)
+        if name.startswith("encoder.backbone"):
+            backbone_params.append(p)
+        elif name.startswith("encoder.proj") or name.startswith("encoder.fc"):
+            proj_params.append(p)
+        elif name.startswith("head"):
+            head_params.append(p)
         else:
-            fc_params.append(p)
+            # default bucket
+            proj_params.append(p)
 
+    # Backward compatible: use lr_conv for backbone, lr_fc for proj, lr_alpha for head
     param_groups = [
-        {"params": conv_params, "lr": lr_conv, "momentum": momentum_start, "weight_decay": wd_conv},
-        {"params": fc_params, "lr": lr_fc, "momentum": momentum_start, "weight_decay": wd_fc},
-        {"params": alpha_params, "lr": lr_alpha, "momentum": momentum_start, "weight_decay": wd_alpha},
+        {"params": backbone_params, "lr": lr_conv, "weight_decay": wd_conv},
+        {"params": proj_params, "lr": lr_fc, "weight_decay": wd_fc},
+        {"params": head_params, "lr": lr_alpha, "weight_decay": wd_alpha},
     ]
     # Drop empty groups
     param_groups = [g for g in param_groups if len(g["params"]) > 0]
 
+    if optim_name == "adamw":
+        optimizer = torch.optim.AdamW(param_groups)
+        return OptimBundle(optimizer=optimizer, scheduler=None)
+
+    # default: SGD (paper-style)
+    for g in param_groups:
+        g["momentum"] = momentum_start
     optimizer = torch.optim.SGD(param_groups)
 
     # Momentum final values per group (PaperLrMomentumScheduler supports list/tuple)
     momentum_finals = []
     # Match group ordering above (conv, fc, alpha) but only for groups that exist
     for g in param_groups:
-        if g["params"] is conv_params:
+        if g["params"] is backbone_params:
             momentum_finals.append(mu_conv)
-        elif g["params"] is alpha_params:
+        elif g["params"] is head_params:
             momentum_finals.append(mu_alpha)
         else:
             momentum_finals.append(mu_fc)
