@@ -36,6 +36,21 @@ def _config_paths(config_dir: Path) -> List[Path]:
     return [config_dir / n for n in names if (config_dir / n).exists()]
 
 
+def _infer_hw_from_cfg(cfg: dict) -> tuple[int, int]:
+    """
+    Try to infer the model input H,W from config.
+    Falls back to 105x105 (common for LFW Siamese setups) if not found.
+    """
+    tcfg = cfg.get("transform", {}) or {}
+    for k in ("size", "image_size", "input_size", "resize"):
+        v = tcfg.get(k, None)
+        if isinstance(v, int) and v > 0:
+            return int(v), int(v)
+        if isinstance(v, (list, tuple)) and len(v) == 2:
+            return int(v[0]), int(v[1])
+    return 105, 105
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config_dir", type=str, default="src/config")
@@ -78,7 +93,6 @@ def main() -> None:
     train_pairs: List[Pair] = parse_pairs_file(pairs_train, images_root=images_root)
 
     if pairs_val_str:
-        # Explicit val file (use only if you truly have one; DO NOT point this at test)
         val_pairs = parse_pairs_file((project_root / pairs_val_str).resolve(), images_root=images_root)
         logger.info("Validation source: pairs_val file=%s", (project_root / pairs_val_str).resolve())
     else:
@@ -110,11 +124,18 @@ def main() -> None:
     head = WeightedL1Head(dim=int(enc_cfg.fc_out))
     model = SiameseNet(encoder=encoder, head=head).to(device)
 
-    # Lazy-FC materialization + init (use TRAIN batch only)
+    # -------------------------
+    # Lazy-FC materialization + init (NO DataLoader read)
+    # -------------------------
     init_weights_like_reference(model)
+
+    H, W = _infer_hw_from_cfg(cfg)
+    C = int(enc_cfg.in_channels)
     with torch.no_grad():
-        x1, x2, _y = next(iter(train_loader))
-        _ = model(x1.to(device), x2.to(device))
+        dummy1 = torch.zeros((1, C, H, W), device=device, dtype=torch.float32)
+        dummy2 = torch.zeros((1, C, H, W), device=device, dtype=torch.float32)
+        _ = model(dummy1, dummy2)
+
     init_weights_like_reference(model)
 
     # -------------------------
