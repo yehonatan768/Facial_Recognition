@@ -56,7 +56,9 @@ class ConvEmbeddingNet(nn.Module):
         if self._fc_in is not None:
             return
         self._fc_in = int(x.shape[1])
-        self.fc = nn.Linear(self._fc_in, self.cfg.fc_out)
+
+        # Create the FC layer on the same device/dtype as x
+        self.fc = nn.Linear(self._fc_in, self.cfg.fc_out).to(device=x.device, dtype=x.dtype)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.pool(self.relu(self.conv1(x)))
