@@ -10,16 +10,21 @@ from src.utils.read_config import load_config_files, resolve_project_root
 from src.utils.logger import build_logger
 from src.utils.seed import seed_everything
 from src.utils.io import save_json
+
 from src.data.load_pairs import parse_pairs_file
 from src.data.graph_split import split_by_components
 from src.data.datasets import build_dataloaders, Pair
+from src.data.transforms import build_transform  # NEW: train/eval transform split
+
 from src.model.cnn_embedder import ConvEmbeddingConfig, ConvEmbeddingNet
 from src.model.head import SimilarityHeadConfig, WeightedL1Head
 from src.model.siamese import SiameseNet
 from src.model.init import init_weights_like_reference
+
 from src.training.optim import build_optimizer, step_schedule
 from src.training.loop import train_one_epoch, eval_one_epoch
 from src.training.early_stop import EarlyStopper
+
 from src.evaluation.plots import plot_loss_curves
 
 
@@ -109,7 +114,22 @@ def main() -> None:
         train_pairs = res.train_pairs
         logger.info("Validation source: split_from_train (train_txt=%s)", pairs_train)
 
-    train_loader, val_loader = build_dataloaders(cfg, train_pairs, val_pairs)
+    # -------------------------
+    # Transforms: train vs eval (deterministic eval)
+    # -------------------------
+    train_transform = build_transform(cfg, train=True)
+    eval_transform = build_transform(cfg, train=False)
+
+    # -------------------------
+    # DataLoaders (must accept the two transforms)
+    # -------------------------
+    train_loader, val_loader = build_dataloaders(
+        cfg,
+        train_pairs,
+        val_pairs,
+        train_transform=train_transform,
+        eval_transform=eval_transform,
+    )
 
     logger.info("Loaded train pairs: %d", len(train_pairs))
     logger.info("Loaded val pairs: %d", len(val_pairs))
@@ -167,7 +187,7 @@ def main() -> None:
     )
 
     # -------------------------
-    # Best checkpoint ALWAYS by val_accuracy (per your requirement)
+    # Best checkpoint ALWAYS by val_accuracy
     # -------------------------
     best_path = run_dir / "best.pt"
     best_val_acc = float("-inf")
@@ -230,7 +250,6 @@ def main() -> None:
             )
 
         # Early stop should use the configured monitor
-        # Map monitor name -> current value
         monitor_map = {
             "train_loss": float(tr_loss),
             "val_loss": float(va_loss),
@@ -257,6 +276,7 @@ def main() -> None:
 
     try:
         import yaml
+
         (run_dir / "config_merged.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
     except Exception:
         pass
@@ -268,7 +288,6 @@ def main() -> None:
 
     plot_loss_curves(history, run_dir / "plots")
     logger.info("Done. Best epoch=%d | best_val_accuracy=%.6f", best_epoch, best_val_acc)
-
 
 
 if __name__ == "__main__":

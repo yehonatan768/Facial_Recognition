@@ -4,3 +4,29 @@ transform:
   normalize: true
   mean: 0.5
   std: 0.5
+
+  augment:
+    enabled: true
+    random_resized_crop: true
+    rrc_scale_min: 0.85
+    rrc_scale_max: 1.0
+    rrc_ratio_min: 0.95
+    rrc_ratio_max: 1.05
+
+    random_affine: true
+    affine_degrees: 5.0
+    affine_translate: 0.03
+    affine_scale_min: 0.98
+    affine_scale_max: 1.02
+
+    hflip_p: 0.5
+
+    color_jitter: true
+    cj_brightness: 0.10
+    cj_contrast: 0.10
+    gray_gamma: 0.10
+
+    blur_p: 0.15
+    blur_kernel: 3
+    blur_sigma_min: 0.1
+    blur_sigma_max: 1.0
