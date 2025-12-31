@@ -62,7 +62,6 @@ class BalancedPairBatchSampler(Sampler[List[int]]):
         pi = 0
         ni = 0
 
-        # stable number of batches per epoch (roughly one pass over dataset)
         n_batches = len(self)
         for _ in range(n_batches):
             batch: List[int] = []
@@ -111,7 +110,6 @@ def build_dataloaders(
     train_ds = PairPathDataset(train_pairs, transform=train_transform)
     val_ds = PairPathDataset(val_pairs, transform=eval_transform)
 
-    # NO shuffle sampler (balanced batches)
     sampler = BalancedPairBatchSampler(train_pairs, batch_size=bs)
 
     train_loader = DataLoader(

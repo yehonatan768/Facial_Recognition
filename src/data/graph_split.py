@@ -132,10 +132,8 @@ def split_by_components(
     target_val_pairs = int(round(val_ratio * total_pairs))
     target_val_pairs = max(1, min(target_val_pairs, total_pairs - 1))
 
-    # Target number of positive pairs in val (integer target, not fraction)
     target_val_pos = int(round(target_pos_frac * target_val_pairs))
 
-    # Precompute component stats: n_pairs, n_pos, ids
     comp_stats = []
     for comp in comps:
         comp_pairs = _pairs_for_ids(pairs, comp)
@@ -151,15 +149,12 @@ def split_by_components(
             }
         )
 
-    # Shuffle for tie-breaking determinism
     rng.shuffle(comp_stats)
 
-    # Greedy selection:
-    # objective = wN*|n_val - target_val_pairs| + wP*|pos_val - target_val_pos| + wI*identity_penalty
-    # We express balance in terms of POS COUNTS instead of pos_frac; this is far more stable.
+
     wN = 1.0
     wP = 1.0
-    wI = float(target_val_pairs) * 0.10  # make identity constraint matter early
+    wI = float(target_val_pairs) * 0.10
 
     val_ids: Set[str] = set()
     val_pairs: List[Pair] = []
@@ -171,18 +166,14 @@ def split_by_components(
     def obj(n_val: int, pos_val: int, n_ids: int) -> float:
         id_pen = 0.0
         if n_ids < min_val_identities:
-            # linear penalty for being under the minimum
             id_pen = float(min_val_identities - n_ids)
         return wN * abs(n_val - target_val_pairs) + wP * abs(pos_val - target_val_pos) + wI * id_pen
 
-    # Keep adding components until we are reasonably close.
-    # Stop condition is conservative to avoid pathological overshoot.
     max_iters = len(remaining)
     for _ in range(max_iters):
         if not remaining:
             break
 
-        # If we already meet min identities and we're close in size, stop.
         if len(val_ids) >= min_val_identities and val_n >= target_val_pairs:
             break
 
@@ -197,15 +188,11 @@ def split_by_components(
             new_ids = len(val_ids | set(st["ids"]))
             new_obj = obj(new_n, new_pos, new_ids)
 
-            # prefer strict improvement
             if new_obj < best_obj - 1e-12:
                 best_obj = new_obj
                 best_i = i
 
         if best_i is None:
-            # No strict improvement:
-            # - if we need more identities, take component with most ids
-            # - else take smallest component to avoid massive overshoot
             if len(val_ids) < min_val_identities:
                 best_i = max(range(len(remaining)), key=lambda j: remaining[j]["n_ids"])
             else:
@@ -217,7 +204,6 @@ def split_by_components(
         val_n += chosen["n_pairs"]
         val_pos += chosen["n_pos"]
 
-    # Train = pairs whose BOTH identities are outside val_ids
     train_pairs: List[Pair] = []
     train_ids: Set[str] = set()
     for pr in pairs:
@@ -228,7 +214,6 @@ def split_by_components(
         train_ids.add(a)
         train_ids.add(b)
 
-    # Recompute val_ids_final from val_pairs (robustness)
     val_ids_final: Set[str] = set()
     for pr in val_pairs:
         a, b = _pair_ids(pr)
@@ -240,9 +225,7 @@ def split_by_components(
         overlap = sorted(list(train_ids & val_ids_final))[:10]
         raise RuntimeError(f"Identity leakage detected (train_ids ∩ val_ids != ∅). Example overlap: {overlap}")
 
-    # -------------------------
-    # Minimal within-split rebalance (optional, but stabilizes val metrics)
-    # -------------------------
+
     def _rebalance_min_drop(pairs_in: List[Pair], target_pf: float) -> List[Pair]:
         """
         Make pos_frac closer to target by dropping the minimum number of samples
@@ -255,17 +238,13 @@ def split_by_components(
         neg = [p for p in pairs_in if _label(p) == 0]
 
         if not pos or not neg:
-            # Can't rebalance if one class is missing
             return pairs_in
 
-        # desired counts with minimal dropping:
-        # keep all of minority, drop from majority until ratio is close
-        # target_pf = pos / (pos+neg)
+
         p = len(pos)
         n = len(neg)
 
-        # compute desired totals while keeping as much as possible
-        # If current pf < target: negatives are majority -> drop negatives
+
         cur_pf = float(p) / float(p + n)
         if abs(cur_pf - target_pf) < 1e-6:
             return pairs_in
@@ -274,35 +253,26 @@ def split_by_components(
         rng.shuffle(neg)
 
         if cur_pf < target_pf:
-            # need higher pf -> drop negatives
-            # keep all positives, choose k negatives so that p/(p+k) ~= target_pf
-            # k ~= p*(1-target)/target
             k = int(round(p * (1.0 - target_pf) / max(1e-12, target_pf)))
             k = max(1, min(k, n))
             return pos + neg[:k]
         else:
-            # need lower pf -> drop positives
-            # keep all negatives, choose k positives so that k/(k+n) ~= target_pf
             k = int(round(target_pf * n / max(1e-12, (1.0 - target_pf))))
             k = max(1, min(k, p))
             return pos[:k] + neg
 
-    # Rebalance VAL first (most important for stable early stopping/plots)
-    # Only rebalance if it's meaningfully off (>= ~5%)
+
     val_pf_before = _pos_frac(val_pairs)
     if abs(val_pf_before - target_pos_frac) >= 0.05:
         val_pairs_bal = _rebalance_min_drop(val_pairs, target_pos_frac)
-        # keep only if it doesn't collapse size too much
         if len(val_pairs_bal) >= int(0.50 * len(val_pairs)):
             val_pairs = val_pairs_bal
 
-    # Optionally rebalance TRAIN mildly (less critical; keep more data)
     train_pf_before = _pos_frac(train_pairs)
     if abs(train_pf_before - target_pos_frac) >= 0.10:
         train_pairs_bal = _rebalance_min_drop(train_pairs, target_pos_frac)
         if len(train_pairs_bal) >= int(0.70 * len(train_pairs)):
             train_pairs = train_pairs_bal
-            # recompute train_ids to match (still no leakage)
             train_ids = set()
             for pr in train_pairs:
                 a, b = _pair_ids(pr)
