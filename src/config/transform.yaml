@@ -1,5 +1,5 @@
 transform:
-  size: 105
+  size: 224
   to_grayscale: true
   normalize: true
   mean: 0.5
@@ -14,19 +14,19 @@ transform:
     rrc_ratio_max: 1.05
 
     random_affine: true
-    affine_degrees: 5.0
-    affine_translate: 0.03
+    affine_degrees: 10.0
+    affine_translate: 0.06
     affine_scale_min: 0.98
     affine_scale_max: 1.02
 
     hflip_p: 0.5
 
     color_jitter: true
-    cj_brightness: 0.10
-    cj_contrast: 0.10
-    gray_gamma: 0.10
+    cj_brightness: 0.20
+    cj_contrast: 0.20
+    gray_gamma: 0.15
 
-    blur_p: 0.15
+    blur_p: 0.08
     blur_kernel: 3
     blur_sigma_min: 0.1
-    blur_sigma_max: 1.0
+    blur_sigma_max: 0.7

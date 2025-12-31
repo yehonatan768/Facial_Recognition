@@ -8,7 +8,7 @@ train:
     enabled: true
     monitor: val_loss
     mode: min
-    patience: 10
+    patience: 20
     min_delta: 0.0
 
 # Put split at TOP LEVEL so train.py always sees it
