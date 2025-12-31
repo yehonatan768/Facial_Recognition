@@ -25,5 +25,5 @@ def plot_loss_curves(history: Dict[str, List[float]], out_dir: Path) -> None:
     plt.grid(True)
     plt.legend()
     plt.tight_layout()
-    plt.savefig(out_dir / "loss.png")
+    plt.savefig(out_dir / "loss_base.png")
     plt.close()
